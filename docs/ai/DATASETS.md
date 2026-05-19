@@ -80,14 +80,128 @@ hf download nvidia/Nemotron-Personas-Korea \
 
 ---
 
-## 추가 데이터셋 후보 (미도입)
+---
 
-자동심사 합성 파이프라인 Layer 2(Financial Profile) / Layer 3(Narrative) 구축 시 검토:
+## 2. HuggingFace 외부 신용·연체 데이터 (자동심사 학습 reference)
 
-| 후보 | 용도 | 상태 |
-|------|------|------|
-| KOSIS Open API (가구소득 분위, 산업별 임금) | Financial Profile 분포 시드 | 미도입, API 키 발급 필요 |
-| 한국은행 ECOS API (가계대출 통계) | DSR/LTV 분포 검증 | 미도입 |
-| 금감원 공시 (대출 연체율 분기) | Oracle 레이블 분포 보정 | 미도입 |
+한국어 정형 신용 데이터가 사실상 부재해, 영어 클래식·합성 데이터를 모델 구조 검증·SHAP sanity check·분포 비교용으로 사용. 직접 학습 데이터 아님 — Layer 4 oracle 규칙 보정과 외부 reference 비교에 사용.
 
-도입 시 본 문서에 동일 형식으로 항목 추가.
+저장 위치: `data/external/credit/` (`.gitignore` 처리)
+
+### 2.1 deburky/home-credit-credit-risk-model-stability
+- 출처: <https://huggingface.co/datasets/deburky/home-credit-credit-risk-model-stability>
+- 라이선스: Other (확인 필요, 학습/포트폴리오 한정 사용)
+- 규모: 522,596 rows × 48 cols, target 이진 (default 3.3%)
+- 핵심 컬럼: DPD(연체일수) 다종, credit amount, age, sex, education, marital state
+- 용도: 단일 테이블 형식이라 즉시 학습 가능. 공정성 평가에 인구학 컬럼 포함.
+
+### 2.2 mohameddhameem/home-credit-default-risk
+- 출처: <https://huggingface.co/datasets/mohameddhameem/home-credit-default-risk>
+- 라이선스: **CC-BY-4.0**
+- 규모: application_train 307,511 rows × 122 cols + 보조 6 테이블 (bureau, credit_card_balance, installments_payments, pos_cash_balance, previous_application)
+- 핵심: EXT_SOURCE_1/2/3 외부 신용점수, AMT_INCOME_TOTAL, AMT_CREDIT, DAYS_BIRTH 등
+- 용도: 실제 다중 테이블 심사 시나리오. 다리 모델 학습 외부 reference.
+
+### 2.3 marcilioduarte/german_credit_risk
+- 출처: <https://huggingface.co/datasets/marcilioduarte/german_credit_risk>
+- 라이선스: (Kaggle/PSU 출처, 공개)
+- 규모: 1,000 rows × 21 cols, target `Creditability`
+- 용도: 클래식 데이터셋. SHAP 결과가 교과서적으로 나오는지 sanity check.
+
+### 2.4 hpestrellag/payments_delinquency
+- 출처: <https://huggingface.co/datasets/hpestrellag/payments_delinquency>
+- 라이선스: **CC-BY-NC-4.0** (비상업 OK)
+- 규모: 500,000 rows × 9 cols (합성)
+- 핵심: 결제 거절·연체 알람 행동
+- 용도: 우리 합성 데이터 분포 비교 reference.
+
+---
+
+## 3. 한국 공공 API 데이터 (한국 macro 분포 시드)
+
+자동심사 합성 파이프라인의 한국 분포 시드와 Oracle base rate 보정에 사용.
+
+저장 위치: `data/external/korean/<source>/` (`.gitignore` 처리)
+수집 코드: `synthetic-data-generator/src/loaders/`
+
+### 3.1 한국은행 ECOS (3개 시계열)
+
+API: <https://ecos.bok.or.kr/api/> · 키 환경변수 `KOREA_BANK_API_KEY`
+
+| 통계코드 | 주기 | rows | 친근명 | 용도 |
+|---------|-----|------|--------|------|
+| `151Y005` | Q | 297 | household_credit | 가계신용 잔액 (Layer 4 macro feature) |
+| `104Y014` | M | 891 | deposit_inst_household_loan | 예금취급기관 가계대출 |
+| `722Y001` | M | 900 | policy_rate | 한국은행 기준금리·여수신금리 (금리 환경 feature) |
+
+### 3.2 통계청 KOSIS — 가계금융복지조사 (23개 통계표, 178,890 rows)
+
+API: <https://kosis.kr/openapi/> · 키 환경변수 `KOSIS_API_KEY` · 모두 orgId=`101`
+
+**자산·부채·소득 결합 (4)**
+| tblId | rows | 친근명 |
+|-------|------|--------|
+| `DT_1HDAAA10` | 15,240 | income_quintile_asset_debt |
+| `DT_1HDAAA22` | 10,692 | income_decile_asset_debt |
+| `DT_1HDAAA09` | 12,700 | employment_status_asset_debt |
+| `DT_1HDAAA14` | 31,104 | income_x_asset_quintile_asset_debt |
+
+**가구주 특성별 (8) — 피처 분포·공정성 시드**
+| tblId | rows | 친근명 |
+|-------|------|--------|
+| `DT_1HDAAA05` | 7,620 | gender_asset_debt |
+| `DT_1HDAAA06` | 20,316 | age_group_asset_debt |
+| `DT_1HDAAA07` | 12,700 | marital_status_asset_debt |
+| `DT_1HDAAA08` | 12,700 | education_asset_debt |
+| `DT_1HDAAA03` | 12,670 | housing_tenure_asset_debt |
+| `DT_1HDAAA02` | 12,696 | housing_type_asset_debt |
+| `DT_1HDAAA04` | 15,236 | household_size_asset_debt |
+| `DT_1HDAAB01` | 3,712 | income_source_decomposition |
+
+**재무건전성 (5) — DSR/부채상환능력 지표**
+| tblId | rows | 친근명 |
+|-------|------|--------|
+| `DT_1HDAAA17` | 720 | employment_status_financial_health |
+| `DT_1HDAAA16` | 1,152 | age_group_financial_health |
+| `DT_1HDAAA18` | 864 | income_quintile_financial_health |
+| `DT_1HDAAA19` | 864 | asset_quintile_financial_health |
+| `DT_1HDAAA20` | 864 | net_asset_quintile_financial_health |
+
+**담보부채 비율 (3) — LTV proxy**
+| tblId | rows | 친근명 |
+|-------|------|--------|
+| `DT_1HDAAC03` | 1,200 | income_quintile_collateral_debt_ratio |
+| `DT_1HDAAC01` | 1,600 | age_group_collateral_debt_ratio |
+| `DT_1HDAAC04` | 1,200 | asset_quintile_collateral_debt_ratio |
+
+**신용부채 비율 (3) — 무담보 부담 proxy**
+| tblId | rows | 친근명 |
+|-------|------|--------|
+| `DT_1HDAAC08` | 960 | income_quintile_credit_debt_ratio |
+| `DT_1HDAAC06` | 1,280 | age_group_credit_debt_ratio |
+| `DT_1HDAAC07` | 800 | employment_status_credit_debt_ratio |
+
+### 3.3 공공데이터포털 / FISIS — 보류
+
+| 소스 | 상태 |
+|------|------|
+| 공공데이터포털 (`PUBLIC_DATA_API_KEY`) | 데이터셋별 endpoint 활용신청 승인 후 운영 URL 발급. 코드 골격은 `loaders/data_go_kr.py` 에 placeholder |
+| 금감원 FISIS (`FISIS_API_KEY`) | ECOS 와 통계 중복 다수. placeholder 만 유지 |
+
+---
+
+## 재현 절차
+
+전체 한국 공공 데이터 수집:
+```bash
+cd synthetic-data-generator
+pip install -r requirements.txt
+python -m scripts.fetch_all --source ecos,kosis
+```
+
+KOSIS API 는 통계표별 분류 차원 수가 달라 `loaders/kosis.py` 의 `fetch_table` 이 자동 depth 1~6 fallback 으로 처리.
+
+HuggingFace 데이터셋 재다운로드:
+```bash
+hf download <dataset_id> --repo-type dataset --local-dir data/external/credit/<short_name>
+```
