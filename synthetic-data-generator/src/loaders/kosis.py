@@ -101,12 +101,39 @@ def fetch_default_bundle() -> list[Path]:
     """
     targets = [
         # (org_id, tbl_id, prd_se, start, end, friendly_name)
+
+        # --- 자산·부채·소득 결합 (분위/소속별) ---
         ("101", "DT_1HDAAA10", "Y", "2018", "2025", "income_quintile_asset_debt"),
         ("101", "DT_1HDAAA22", "Y", "2018", "2025", "income_decile_asset_debt"),
         ("101", "DT_1HDAAA09", "Y", "2018", "2025", "employment_status_asset_debt"),
+        ("101", "DT_1HDAAA14", "Y", "2018", "2025", "income_x_asset_quintile_asset_debt"),
+
+        # --- 가구주 특성별 자산·부채·소득 (피처 분포) ---
+        ("101", "DT_1HDAAA05", "Y", "2018", "2025", "gender_asset_debt"),
+        ("101", "DT_1HDAAA06", "Y", "2018", "2025", "age_group_asset_debt"),
+        ("101", "DT_1HDAAA07", "Y", "2018", "2025", "marital_status_asset_debt"),
+        ("101", "DT_1HDAAA08", "Y", "2018", "2025", "education_asset_debt"),
+        ("101", "DT_1HDAAA03", "Y", "2018", "2025", "housing_tenure_asset_debt"),
+        ("101", "DT_1HDAAA02", "Y", "2018", "2025", "housing_type_asset_debt"),
+        ("101", "DT_1HDAAA04", "Y", "2018", "2025", "household_size_asset_debt"),
+        ("101", "DT_1HDAAB01", "Y", "2018", "2025", "income_source_decomposition"),
+
+        # --- 재무건전성 (DSR / 부채상환능력 등) ---
         ("101", "DT_1HDAAA17", "Y", "2018", "2025", "employment_status_financial_health"),
+        ("101", "DT_1HDAAA16", "Y", "2018", "2025", "age_group_financial_health"),
+        ("101", "DT_1HDAAA18", "Y", "2018", "2025", "income_quintile_financial_health"),
+        ("101", "DT_1HDAAA19", "Y", "2018", "2025", "asset_quintile_financial_health"),
+        ("101", "DT_1HDAAA20", "Y", "2018", "2025", "net_asset_quintile_financial_health"),
+
+        # --- 담보부채 비율 (LTV proxy) ---
         ("101", "DT_1HDAAC03", "Y", "2018", "2025", "income_quintile_collateral_debt_ratio"),
+        ("101", "DT_1HDAAC01", "Y", "2018", "2025", "age_group_collateral_debt_ratio"),
+        ("101", "DT_1HDAAC04", "Y", "2018", "2025", "asset_quintile_collateral_debt_ratio"),
+
+        # --- 신용부채 비율 (무담보 부담 proxy) ---
         ("101", "DT_1HDAAC08", "Y", "2018", "2025", "income_quintile_credit_debt_ratio"),
+        ("101", "DT_1HDAAC06", "Y", "2018", "2025", "age_group_credit_debt_ratio"),
+        ("101", "DT_1HDAAC07", "Y", "2018", "2025", "employment_status_credit_debt_ratio"),
     ]
     out: list[Path] = []
     for org_id, tbl_id, prd_se, start, end, name in targets:
