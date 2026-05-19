@@ -1,5 +1,5 @@
 server:
-  port: ${AI_APP_PORT:8085}
+  port: ${AI_APP_PORT:8086}
 
 spring:
   application:
@@ -21,7 +21,7 @@ management:
       show-details: always
 
 # ---- OpenAPI / Swagger UI ----
-# 접속: http://localhost:${AI_APP_PORT}/swagger-ui.html
+# 접속: http://localhost:${AI_APP_PORT:8086}/swagger-ui.html
 springdoc:
   api-docs:
     path: /v3/api-docs
