@@ -2,7 +2,7 @@ package com.bank.common.audit;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -23,7 +23,7 @@ import java.time.OffsetDateTime;
  */
 @Slf4j
 @Configuration
-@ConditionalOnClass(StatusHistoryRepository.class)
+@ConditionalOnBean(StatusHistoryRepository.class)
 @RequiredArgsConstructor
 public class StatusHistoryListener {
 
