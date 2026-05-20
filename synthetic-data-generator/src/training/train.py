@@ -21,7 +21,7 @@ from sklearn.metrics import (
 )
 
 from .dataset import Splits
-from .features import FeatureSchema, prepare_features, prepare_labels
+from .features import FeatureSchema, fit_categories, prepare_features, prepare_labels
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +104,10 @@ def train(splits: Splits, config: TrainConfig | None = None) -> TrainResult:
     import xgboost as xgb
 
     config = config or TrainConfig()
-    schema = FeatureSchema()
+    # 학습 데이터에서 카테고리 순서 fix → 추론에서 동일 코드 보장
+    schema = fit_categories(splits.train, FeatureSchema())
+    log.info("fit_categories: %s",
+             {k: len(v) for k, v in schema.category_codes.items()})
 
     X_train = prepare_features(splits.train, schema)
     y_train = prepare_labels(splits.train, schema)
