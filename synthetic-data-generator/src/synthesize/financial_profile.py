@@ -27,9 +27,11 @@ _OCC_QUINTILE_PRIOR = {
     "regular":       [0.10, 0.20, 0.25, 0.25, 0.20],
 }
 
-# 분위별 연소득 만원 (KOSIS 가구금융복지조사 통상값 근사, 2024 기준)
-_INCOME_QUINTILE_MEAN = [1500, 3000, 4500, 6500, 12000]
-_INCOME_QUINTILE_STD =  [400, 600, 900, 1200, 4000]
+# 분위별 가구 연소득 만원 (KOSIS 가계금융복지조사 2024년 발표 / 2023년 기준)
+# 출처: KOSIS DT_1HDLF05 소득5분위별 평균 경상소득.
+# TODO: loaders.kosis 에서 동적 로드로 전환 (현재는 하드코드).
+_INCOME_QUINTILE_MEAN = [1300, 3300, 5500, 8500, 16000]
+_INCOME_QUINTILE_STD =  [400, 700, 1000, 1500, 5000]
 
 # 분위별 자산/부채 만원
 _ASSET_QUINTILE_MEAN = [10000, 22000, 38000, 65000, 180000]
@@ -95,20 +97,30 @@ def synthesize(personas: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
         scale=np.take(_DEBT_QUINTILE_STD, quintile),
     ), 0).astype(int)
 
-    # 3) 담보/신용 부채 분해
+    # 3) 담보/신용 부채 분해 — 부동산자산 정의 → 담보부채 캡 → LTV 일관성 확보
+    # (D1) 자산 0~극소 행에서 LTV 분모 폭주 방지: 부동산자산 임계 미만이면 담보부채를 0으로,
+    #      그 외는 담보부채를 부동산자산 이내로 캡(LTV ≤ 1.0 자연 보장).
+    real_estate = (total_asset * 0.6).astype(np.int64)
+    NO_RE_THRESHOLD_KW = 1000  # 1,000만원 미만은 "부동산자산 없음"으로 간주
+    no_re_mask = real_estate < NO_RE_THRESHOLD_KW
+
     collat_share = np.take(_COLLATERAL_SHARE_BY_Q, quintile)
     noise = rng.normal(0, 0.05, size=n)
     collat_share = np.clip(collat_share + noise, 0.0, 1.0)
-    collateral_debt = (total_debt * collat_share).astype(int)
-    credit_debt = total_debt - collateral_debt
+    collateral_debt = (total_debt * collat_share).astype(np.int64)
+    # 부동산자산이 없는 가구: 담보부채는 정의 불가 → 0 (총부채는 신용부채로 흡수)
+    collateral_debt = np.where(no_re_mask, 0, collateral_debt)
+    # 담보부채는 부동산자산을 초과할 수 없음(LTV ≤ 1.0)
+    collateral_debt = np.minimum(collateral_debt, real_estate).astype(np.int64)
+    credit_debt = (total_debt - collateral_debt).astype(np.int64)
 
     # 4) DSR, LTV 추정
     # DSR = 연원리금상환액 / 연소득. 부채를 5년 분할상환 가정.
     annual_repay = total_debt / 5 + total_debt * 0.05  # 원금 + 5% 이자
     dsr = annual_repay / np.maximum(annual_income, 1)
-    # LTV = 담보부채 / 부동산자산. 부동산자산을 총자산의 60%로 가정.
-    real_estate = total_asset * 0.6
-    ltv = collateral_debt / np.maximum(real_estate, 1)
+    # LTV: 부동산자산 없으면 0(정의 불가), 있으면 담보부채/부동산자산. 위의 캡으로 ≤1.0 보장.
+    ltv = np.where(real_estate > 0, collateral_debt / np.maximum(real_estate, 1), 0.0)
+    ltv = np.clip(ltv, 0.0, 1.0)
 
     # 5) 거래내역 통계 (월평균/변동성)
     monthly_cashflow_mean = annual_income / 12

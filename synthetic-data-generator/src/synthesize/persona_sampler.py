@@ -19,7 +19,7 @@ PERSONA_DIR = PROJECT_ROOT / "data" / "synthetic" / "personas" / "slim"
 # KDI 가계부채 보고서 등에서 청년·자영업 over-representation 확인.
 _OCC_WEIGHT_RULES: list[tuple[str, float]] = [
     (r"자영|소상공|개인사업|자영업", 1.5),
-    (r"단순|일용|일당|비정규", 0.8),
+    (r"단순|일용|일당|비정규", 1.2),  # precarious 표본 확보를 위해 가중치 상향(D2)
     (r"무직|학생|전업주부", 0.4),
 ]
 
