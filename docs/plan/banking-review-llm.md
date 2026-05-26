@@ -1,15 +1,15 @@
 # 대출 심사원 보조 자동 대출 심사 — 큰 그림
 
-> Last updated: 2026-05-20
-> Status: design draft (Phase 0 완료, Phase 1.1 검증 단계)
+> Last updated: 2026-05-26
+> Status: Phase 1.5/1.6 완료, Phase 1.7 RAG 보류, Pre-Review Agent (A4~A9) 완료
 > Owner: ai-service 팀
 
 본 문서는 자동 대출 심사 보조 시스템의 **시스템 비전·구성 요소·책임 분담·의사결정 흐름**을 한 곳에 정리한 source of truth. 신규 합류자가 5분 안에 의도를 파악하고, 후속 phase 작성 시 본 문서를 참조한다.
 
 상세는 별도 문서로 분리:
 - [docs/ai/DATASETS.md](../ai/DATASETS.md) — 외부 데이터셋 출처·라이선스
-- `docs/ai/MODEL_CARDS.md` (작성 예정) — 모델 버전·평가·한계
-- `docs/ai/PROMPT_REGISTRY.md` (작성 예정) — 프롬프트 카탈로그
+- [docs/ai/MODEL_CARDS.md](../ai/MODEL_CARDS.md) — 모델 버전·평가·한계
+- [docs/ai/PROMPT_REGISTRY.md](../ai/PROMPT_REGISTRY.md) — 프롬프트 카탈로그
 - `docs/ai/COMPLIANCE.md` (작성 예정) — 규제 인용
 
 ---
@@ -437,10 +437,11 @@ doc: "주담대 정상 직장인 PD 임계치는 자행 신용정책서 §3.2.1 
 | 1.2 | RuleEngine (Java, 정책 매트릭스 lookup 포함) | 예정 |
 | 1.3 | Feature Engineering + 임베딩 (bge-m3) | 예정 |
 | 1.4 | PD 모델 학습 (LightGBM) | 예정 |
-| 1.5 | LLM 보강 (신청 사유 분석) | 예정 |
-| 1.6 | LLM 리포트 생성기 (트랙별 톤) | 예정 |
-| 1.7 | RAG 구축 (3 코퍼스) | 예정 |
-| 1.8 | `/evaluate` API 통합 + 트랙 분기 | 예정 |
+| 1.5 | LLM 보강 (신청 사유 분석) | ✅ 완료 |
+| 1.6 | LLM 리포트 생성기 (트랙별 톤) | ✅ 완료 |
+| 1.6.1 | Pre-Review Agent (Track 3 시뮬 + Track 2 거절 초안, A4~A9) | ✅ 완료 |
+| 1.7 | RAG 구축 (3 코퍼스) | ⏸ 보류 (rag-corpora.md 참조) |
+| 1.8 | `/evaluate` API 통합 + 트랙 분기 | ✅ 완료 |
 | 1.9 | 모니터링·Shadow 모드 | 예정 |
 | **자동심사 MVP 완성** | | 9~12주 |
 | 2 | 2nd Opinion Agent (별도 로드맵) | 후순위 |

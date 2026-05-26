@@ -190,19 +190,19 @@ ai:
 
 | # | 산출물 | 커밋 분리 | 상태 |
 |---|--------|----------|:----:|
-| A0 | 본 문서 + PROGRESS Phase 2 슬롯 갱신 | docs | 🔄 |
+| A0 | 본 문서 + PROGRESS Phase 2 슬롯 갱신 | docs | ✅ |
 | **A0.5** | **Gemini OpenAI-compat tool calling smoke** — `GeminiToolCallingSpikeTest` (더미 도구 1개). PASS → A1 진입, FAIL → provider 재결정 (VERTEX 직통 또는 유료 전환) | spike (커밋 X) | ⬜ |
-| A1 | `LlmProperties.Provider.GEMINI_OPENAI_COMPAT` 추가 + `LlmRequestRateMeter`(RPD/RPM) 신규 | feat + test | ⬜ |
-| A2 | `com.bank.ai.agent` 패키지 골격 + `AgentOpinion` + `agent_opinion_json` 마이그레이션 | feat + test | ⬜ |
-| A3 | 4개 read-only tool + Stub 응답 | feat + test | ⬜ |
-| A4 | `PreReviewAgentService` (tool calling) + `AgentLoopGuard` | feat + test | ⬜ |
-| A5 | `RiskLevelDeriver` + `SemanticDisagreementDetector` + `GroundingValidator.validateNumericClaims` 확장 | feat + test | ⬜ |
-| A6 | `AutoReviewEventListener` Track 3 트리거 + `LoanServiceClient` 콜백 확장 | feat + test | ⬜ |
-| A7 | E2E smoke 3 케이스 + 회귀 | test | ⬜ |
+| A1 | `LlmProperties.Provider.GEMINI_OPENAI_COMPAT` 추가 + `LlmRequestRateMeter`(RPD/RPM) 신규 | feat + test | ✅ |
+| A2 | `com.bank.ai.agent` 패키지 골격 + `AgentOpinion` + `agent_opinion_json` 마이그레이션 | feat + test | ✅ |
+| A3 | 4개 read-only tool + Stub 응답 | feat + test | ✅ |
+| A4 | `PreReviewAgentService` (tool calling) + `AgentLoopGuard` | feat + test | ✅ |
+| A5 | `RiskLevelDeriver` + `SemanticDisagreementDetector` + `GroundingValidator.validateNumericClaims` 확장 | feat + test | ✅ |
+| A6 | `AutoReviewEventListener` Track 3 트리거 + `LoanServiceClient` 콜백 확장 | feat + test | ✅ |
+| A7 | E2E smoke Track3 전체 파이프라인 + 회귀 | test | ✅ |
 | **— P1 완료 —** | | | |
-| A8 | `RejectionReasonAgentService` (P3) | feat + test | ⬜ |
-| A9 | Track 2 트리거 + 준법 검토용 마킹 + smoke | feat + test | ⬜ |
-| A10 | 문서 동기화 (banking-review-llm §11, MODEL_CARDS, PROMPT_REGISTRY) | docs | ⬜ |
+| A8 | `RejectionReasonAgentService` (P3) | feat + test | ✅ |
+| A9 | Track 2 트리거 + 준법 검토용 마킹 + smoke | feat + test | ✅ |
+| A10 | 문서 동기화 (MODEL_CARDS, PROMPT_REGISTRY, pre-review-agent-plan 상태 갱신) | docs | ✅ |
 
 ---
 
