@@ -15,16 +15,29 @@ ai:
   inference:
     base-url: ${AI_INFERENCE_BASE_URL:http://localhost:8090}
 
+  # ---- 사전 심사 에이전트 (pre-review-agent-plan.md) ----
+  agent:
+    enabled: ${AI_AGENT_ENABLED:true}         # kill switch — false 시 AGENT_DISABLED fallback
+    max-tool-calls: 6                         # loop guard: 단일 run 도구 호출 상한
+    max-llm-calls: 2                          # loop guard: 단일 run LLM 호출 상한
+    fallback-after-rpm: true                  # RPM 초과 시 즉시 fallback (false = 대기, 개발 환경용)
+    rate-reset-hour: 0                        # RPD 리셋 UTC 시각 (0 = 자정)
+
   # ---- LLM 파이프라인 (Phase 1.5/1.6) ----
   # plan/llm-pipeline.md §0 의 운영 원칙: kill switch + provider 추상화 + 토큰 cap.
-  # 현 단계는 stub provider 만 — 운영 cutover 시 vertex/anthropic 로 변경.
+  # 현 단계는 stub provider 만 — 운영 cutover 시 gemini-openai-compat 로 변경.
   llm:
     enabled: ${AI_LLM_ENABLED:true}            # kill switch — false 면 모든 LLM 단계 우회 (template fallback)
-    provider: ${AI_LLM_PROVIDER:stub}          # stub / vertex / anthropic
-    model: ${AI_LLM_MODEL:stub-v1}             # provider 별 모델명 (vertex: gemini-2.5-flash 등)
+    provider: ${AI_LLM_PROVIDER:stub}          # stub / gemini-openai-compat / vertex / anthropic
+    model: ${AI_LLM_MODEL:stub-v1}             # provider 별 모델명 (gemini-openai-compat: gemini-2.5-flash)
     max-tokens: 512
     temperature: 0.0
     daily-token-cap: 1000000                   # plan §9 — 초과 시 TemplateFallback 으로 우회
+    # Gemini OpenAI-compat 전용 (provider=gemini-openai-compat 시 사용)
+    base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai/}
+    api-key: ${GEMINI_API_KEY:}
+    daily-request-cap: ${GEMINI_RPD_CAP:1500}  # AI Studio 무료 RPD 한도
+    rpm-cap: ${GEMINI_RPM_CAP:15}              # AI Studio 무료 RPM 한도
     # 모델별 USD/백만 토큰 단가 — LlmCostMeter llm.cost.usd.daily 산출용 (Phase 1.6 L3)
     # 운영 provider 도입 시 갱신 필요.
     cost-rates-usd-per-million-tokens:

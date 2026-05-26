@@ -33,10 +33,10 @@ import static org.mockito.Mockito.when;
 class PurposeAnalysisServiceTest {
 
     private static final LlmProperties ENABLED = new LlmProperties(
-            true, LlmProperties.Provider.STUB, "stub-v1", 512, 0.0, 1_000_000L
+            true, LlmProperties.Provider.STUB, "stub-v1", 512, 0.0, 1_000_000L, "", "", 0, 0
     );
     private static final LlmProperties DISABLED = new LlmProperties(
-            false, LlmProperties.Provider.STUB, "stub-v1", 512, 0.0, 1_000_000L
+            false, LlmProperties.Provider.STUB, "stub-v1", 512, 0.0, 1_000_000L, "", "", 0, 0
     );
 
     private final PiiMaskingFilter pii = new PiiMaskingFilter();

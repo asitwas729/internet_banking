@@ -22,10 +22,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class LlmCostMeterTest {
 
     private static final LlmProperties PROPS_CAP_100 = new LlmProperties(
-            true, LlmProperties.Provider.STUB, "stub-v1", 512, 0.0, 100L
+            true, LlmProperties.Provider.STUB, "stub-v1", 512, 0.0, 100L, "", "", 0, 0
     );
     private static final LlmProperties PROPS_NO_CAP = new LlmProperties(
-            true, LlmProperties.Provider.STUB, "stub-v1", 512, 0.0, 0L  // 0 = 무제한
+            true, LlmProperties.Provider.STUB, "stub-v1", 512, 0.0, 0L, "", "", 0, 0  // 0 = 무제한
     );
 
     private SimpleMeterRegistry registry;
