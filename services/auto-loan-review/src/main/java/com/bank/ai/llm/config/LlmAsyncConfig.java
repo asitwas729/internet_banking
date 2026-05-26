@@ -37,6 +37,22 @@ public class LlmAsyncConfig implements AsyncConfigurer {
         return executor;
     }
 
+    /**
+     * Shadow Mode 전용 스레드풀 — {@link com.bank.ai.shadow.ShadowModeService} 참조.
+     * prod llmExecutor 와 분리하여 shadow 부하가 prod 에 영향을 주지 않도록 함.
+     */
+    @Bean(name = "shadowExecutor")
+    public ThreadPoolTaskExecutor shadowExecutor() {
+        var executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("shadow-");
+        executor.setWaitForTasksToCompleteOnShutdown(false);  // shadow는 shutdown 시 즉시 포기
+        executor.initialize();
+        return executor;
+    }
+
     /** {@code @Async} 에 executor 이름 지정 없이 쓸 경우의 기본 풀. */
     @Override
     public Executor getAsyncExecutor() {

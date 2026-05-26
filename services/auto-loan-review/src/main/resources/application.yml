@@ -37,6 +37,15 @@ ai:
   inference:
     base-url: ${AI_INFERENCE_BASE_URL:http://localhost:8090}
 
+  # ---- B3: Shadow Mode ----
+  shadow:
+    enabled: ${AI_SHADOW_ENABLED:false}       # 기본 off — 운영 초기 2주 검증 시 true
+    model: ${AI_SHADOW_MODEL:stub-v1}
+    prompt-version: ${AI_SHADOW_PROMPT_VERSION:v1}
+    diverge-score-threshold: 0.10
+    sampling-rate: 1.0
+    timeout-seconds: 45
+
   # ---- 사전 심사 에이전트 (pre-review-agent-plan.md) ----
   agent:
     enabled: ${AI_AGENT_ENABLED:true}         # kill switch — false 시 AGENT_DISABLED fallback

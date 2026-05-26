@@ -14,6 +14,7 @@ import com.bank.ai.llm.report.ReviewReportInput;
 import com.bank.ai.llm.report.ReviewReportService;
 import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.metrics.AgentOutcome;
+import com.bank.ai.shadow.ShadowModeService;
 import com.bank.ai.review.client.LoanServiceClient;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.dto.ReviewReportUpdateRequest;
@@ -22,7 +23,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
+import org.springframework.lang.Nullable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
@@ -60,6 +63,11 @@ public class AutoReviewEventListener {
     private final AuditLogProperties auditLogProperties;
     private final AgentMetricsRecorder metricsRecorder;
     private final ObjectMapper objectMapper;
+
+    /** Shadow Mode 비활성 시 null — @ConditionalOnProperty 로 빈 미생성. */
+    @Nullable
+    @Autowired(required = false)
+    private ShadowModeService shadowModeService;
 
     @Async("llmExecutor")
     @EventListener
@@ -106,6 +114,11 @@ public class AutoReviewEventListener {
             loanServiceClient.updateReport(event.revId(),
                     new ReviewReportUpdateRequest("DONE", report, agentOpinionJson));
             log.info("Async LLM pipeline completed for revId: {}", event.revId());
+
+            // Step 6: Shadow run (ai.shadow.enabled=true 시에만 빈 존재)
+            if (shadowModeService != null) {
+                shadowModeService.runShadow(event.revId(), event.request(), event.decision(), opinion);
+            }
 
         } catch (Exception e) {
             log.error("Async LLM pipeline failed for revId: {}", event.revId(), e);
