@@ -10,6 +10,7 @@ import com.bank.ai.llm.purpose.PurposeAnalysis;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
 import com.bank.ai.llm.report.ReviewReport;
 import com.bank.ai.llm.report.ReviewReportService;
+import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.review.client.LoanServiceClient;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.dto.AutoReviewResponse;
@@ -55,6 +56,8 @@ class AutoReviewEventListenerTest {
     private LoanServiceClient loanServiceClient;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private AgentMetricsRecorder metricsRecorder;
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -79,6 +82,7 @@ class AutoReviewEventListenerTest {
                 purposeAnalysisService, reviewReportService, preReviewAgentService,
                 loanServiceClient, auditLogService,
                 new AuditLogProperties(true, false),
+                metricsRecorder,
                 objectMapper);
     }
 
