@@ -12,6 +12,7 @@ import com.bank.loan.dsr.domain.DsrCalculation;
 import com.bank.loan.dsr.repository.DsrCalculationRepository;
 import com.bank.loan.guarantor.service.GuarantorPolicyValidator;
 import com.bank.loan.notification.event.LoanApprovedEvent;
+import com.bank.loan.review.event.LoanReviewCompletedEvent;
 import com.bank.loan.product.domain.LoanProduct;
 import com.bank.loan.product.repository.LoanProductRepository;
 import com.bank.loan.review.domain.LoanReview;
@@ -190,6 +191,10 @@ public class LoanReviewService {
                     application.getCustomerId(), approvedAmount
             ));
         }
+
+        eventPublisher.publishEvent(new LoanReviewCompletedEvent(
+                saved.getRevId(), applId, req.reviewerId(), req.revDecisionCd(), req.revTypeCd()
+        ));
 
         return LoanReviewResponse.of(saved);
     }
