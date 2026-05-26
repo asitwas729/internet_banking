@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 /**
  * LLM 파이프라인 E2E 스모크 테스트 — plan/llm-pipeline.md §11 (L11).
@@ -81,6 +82,23 @@ class AutoReviewPipelineSmokeTest {
             "hmda_v1", "APPROVE", 0.97,
             Map.of("APPROVE", 0.97, "REJECT", 0.03),
             null, null
+    );
+
+    /**
+     * pdScore=0.25 (회색지대: 0.1041 < 0.25 ≤ 0.347), decisionScore=0.65 (0.20 < 0.65 < 0.95) → Track 3.
+     * MORT_001/regular 정책: pdThreshold=0.347, safetyTau=0.347×0.30=0.1041, decStrong=0.95, decReject=0.20.
+     */
+    private static final AutoReviewResponse TRACK3_INFERENCE = new AutoReviewResponse(
+            "hmda_v1", "APPROVE", 0.65,
+            Map.of("APPROVE", 0.65, "REJECT", 0.35),
+            0.25, "pd_v1"
+    );
+
+    /** 시뮬레이션 개선 응답 — decision score +0.07 → toSimResult() risk_reduced 판정. */
+    private static final AutoReviewResponse TRACK3_SIM_IMPROVED = new AutoReviewResponse(
+            "hmda_v1", "APPROVE", 0.72,
+            Map.of("APPROVE", 0.72, "REJECT", 0.28),
+            0.20, "pd_v1"
     );
 
     @BeforeEach
@@ -166,5 +184,42 @@ class AutoReviewPipelineSmokeTest {
         TimeUnit.MILLISECONDS.sleep(600);
 
         verify(loanServiceClient, never()).updateReport(any(), any());
+    }
+
+    // ── TC 4: Track 3 에이전트 전체 파이프라인 — 시뮬레이션 + LLM 요약 ─
+
+    /**
+     * Track 3 E2E: 회색지대 추론 응답 → TrackClassifier → TRACK_3 →
+     * PreReviewAgentService 전체 흐름 (PolicyFlag + PurposeTool + 시뮬×2 + LLM 요약) →
+     * GroundingValidator 통과 → DONE 콜백 (agentOpinionJson MEDIUM, simulation 포함).
+     *
+     * <p>autoReviewService.review() 호출 순서:
+     * 1. RuleEngineService.evaluate() → TRACK3_INFERENCE (track 분기)
+     * 2. RecomputeWithTermsTool sim1 → TRACK3_SIM_IMPROVED (risk_reduced)
+     * 3. RecomputeWithTermsTool sim2 → TRACK3_SIM_IMPROVED (risk_reduced)
+     */
+    @Test
+    void Track3_에이전트_전체_파이프라인_실행_후_DONE_MEDIUM_콜백() {
+        when(autoReviewService.review(any()))
+                .thenReturn(TRACK3_INFERENCE)      // 트랙 분기
+                .thenReturn(TRACK3_SIM_IMPROVED)   // 시뮬레이션 1
+                .thenReturn(TRACK3_SIM_IMPROVED);  // 시뮬레이션 2
+
+        restTemplate.postForEntity("/api/ai/auto-review/evaluate",
+                track1Request(10L), String.class);
+
+        var captor = ArgumentCaptor.forClass(ReviewReportUpdateRequest.class);
+        await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
+                verify(loanServiceClient).updateReport(eq(10L), captor.capture()));
+
+        ReviewReportUpdateRequest req = captor.getValue();
+        assertThat(req.status()).isEqualTo("DONE");
+        assertThat(req.report().track().name()).isEqualTo("TRACK_3");
+        assertThat(req.agentOpinionJson())
+                .isNotNull()
+                .contains("schema_version")
+                .contains("MEDIUM");              // RiskLevelDeriver: Track 3 + decisionScore 0.65 ≥ 0.4 → MEDIUM
+        // 시뮬레이션 2건 실행 확인 (초기 + 시뮬×2 = 총 3회)
+        verify(autoReviewService, times(3)).review(any());
     }
 }
