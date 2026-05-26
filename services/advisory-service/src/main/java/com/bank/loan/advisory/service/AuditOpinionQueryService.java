@@ -4,7 +4,9 @@ import com.bank.common.web.BusinessException;
 import com.bank.common.web.CommonErrorCode;
 import com.bank.loan.advisory.domain.audit.ReviewerRiskScore;
 import com.bank.loan.advisory.dto.AiAuditOpinionResponse;
+import com.bank.loan.advisory.dto.QuarantineReportResponse;
 import com.bank.loan.advisory.dto.ReviewerRiskScoreResponse;
+import com.bank.loan.advisory.repository.ReviewAdvisoryReportRepository;
 import com.bank.loan.advisory.repository.audit.AiAuditOpinionRepository;
 import com.bank.loan.advisory.repository.audit.ReviewerRiskScoreRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,8 +22,9 @@ public class AuditOpinionQueryService {
 
     private static final int MAX_TOP = 100;
 
-    private final AiAuditOpinionRepository opinionRepo;
-    private final ReviewerRiskScoreRepository riskScoreRepo;
+    private final AiAuditOpinionRepository        opinionRepo;
+    private final ReviewerRiskScoreRepository     riskScoreRepo;
+    private final ReviewAdvisoryReportRepository  reportRepo;
 
     @Transactional(readOnly = true)
     public List<AiAuditOpinionResponse> opinionsByAdvr(Long advrId) {
@@ -56,6 +59,13 @@ public class AuditOpinionQueryService {
     public List<ReviewerRiskScoreResponse> topByCompliance(int limit) {
         return riskScoreRepo.findAllByOrderByComplianceScoreDesc(PageRequest.of(0, clamp(limit))).stream()
                 .map(ReviewerRiskScoreResponse::from)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<QuarantineReportResponse> quarantinedReports() {
+        return reportRepo.findAllQuarantined().stream()
+                .map(QuarantineReportResponse::of)
                 .toList();
     }
 

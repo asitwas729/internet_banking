@@ -5,6 +5,7 @@ import com.bank.loan.advisory.domain.ReviewAdvisorySignal;
 import com.bank.loan.advisory.domain.audit.AiAuditOpinion;
 import com.bank.loan.advisory.domain.audit.ReviewerRiskScore;
 import com.bank.loan.advisory.dto.PolicyCitationResponse;
+import com.bank.loan.advisory.event.QuarantineTriggeredEvent;
 import com.bank.loan.advisory.gateway.AiGatewayClient;
 import com.bank.loan.advisory.gateway.GatewayAnalysisRequest;
 import com.bank.loan.advisory.gateway.GatewayAnalysisRequest.GatewayRagChunk;
@@ -20,6 +21,7 @@ import com.bank.loan.review.domain.LoanReview;
 import com.bank.loan.review.repository.LoanReviewRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,6 +57,7 @@ public class AuditFairnessAgent {
     private final PolicyCitationRetriever         citationRetriever;
     private final AiAuditOpinionRepository        opinionRepo;
     private final ReviewerRiskScoreRepository     riskScoreRepo;
+    private final ApplicationEventPublisher       eventPublisher;
 
     @Transactional
     public void analyzeReports(List<Long> advrIds) {
@@ -90,25 +93,27 @@ public class AuditFairnessAgent {
                 .filter(r -> !ADVISORY_TYPE_BIAS.equals(r.getAdvisoryTypeCd())).toList();
 
         if (!biasReports.isEmpty()) {
-            Long advrId = biasReports.get(0).getAdvrId();
             List<GatewaySignalSummary> signals = loadSignals(biasReports);
+            Long advrId = biasReports.get(0).getAdvrId();
             List<GatewayRagChunk> chunks = fetchRagChunks(advrId, AiAuditOpinion.TYPE_BIAS, signals);
-            callAndSave(revId, reviewerId, advrId, AiAuditOpinion.TYPE_BIAS, signals, maskedOpinion, chunks);
+            callAndSave(revId, reviewerId, biasReports, AiAuditOpinion.TYPE_BIAS, signals, maskedOpinion, chunks);
         }
 
         if (!complianceReports.isEmpty()) {
-            Long advrId = complianceReports.get(0).getAdvrId();
             List<GatewaySignalSummary> signals = loadSignals(complianceReports);
+            Long advrId = complianceReports.get(0).getAdvrId();
             List<GatewayRagChunk> chunks = fetchRagChunks(advrId, AiAuditOpinion.TYPE_COMPLIANCE, signals);
-            callAndSave(revId, reviewerId, advrId, AiAuditOpinion.TYPE_COMPLIANCE, signals, maskedOpinion, chunks);
+            callAndSave(revId, reviewerId, complianceReports, AiAuditOpinion.TYPE_COMPLIANCE, signals, maskedOpinion, chunks);
         }
     }
 
-    private void callAndSave(Long revId, Long reviewerId, Long advrId,
+    private void callAndSave(Long revId, Long reviewerId,
+                             List<ReviewAdvisoryReport> groupReports,
                              String analysisType,
                              List<GatewaySignalSummary> signals,
                              String maskedOpinion,
                              List<GatewayRagChunk> ragChunks) {
+        Long advrId = groupReports.get(0).getAdvrId();
         try {
             GatewayAnalysisResponse resp = gatewayClient.analyze(new GatewayAnalysisRequest(
                     analysisType, revId, reviewerId, maskedOpinion, signals, ragChunks));
@@ -129,12 +134,34 @@ public class AuditFairnessAgent {
             if (reviewerId != null) {
                 updateRiskScore(reviewerId, analysisType, resp.conclusion());
             }
+
+            if (isSuspected(resp.conclusion())) {
+                quarantine(groupReports, revId, reviewerId, resp.conclusion(), analysisType);
+            }
+
             log.info("감사 의견 저장 — revId={} type={} conclusion={} confidence={}",
                     revId, analysisType, resp.conclusion(), resp.confidenceScore());
         } catch (Exception e) {
             log.warn("AuditFairnessAgent 분석 실패 (무시) — revId={} type={}: {}",
                     revId, analysisType, e.getMessage());
         }
+    }
+
+    private static boolean isSuspected(String conclusionCd) {
+        return AiAuditOpinion.CONCLUSION_BIAS_SUSPECTED.equals(conclusionCd)
+                || AiAuditOpinion.CONCLUSION_VIOLATION_SUSPECTED.equals(conclusionCd);
+    }
+
+    private void quarantine(List<ReviewAdvisoryReport> reports, Long revId, Long reviewerId,
+                            String conclusionCd, String analysisType) {
+        OffsetDateTime now = OffsetDateTime.now();
+        reports.forEach(r -> r.markQuarantined(now));
+        reportRepo.saveAll(reports);
+
+        List<Long> advrIds = reports.stream().map(ReviewAdvisoryReport::getAdvrId).toList();
+        eventPublisher.publishEvent(new QuarantineTriggeredEvent(revId, reviewerId, conclusionCd, analysisType, advrIds));
+        log.warn("격리(Quarantine) 신호 발행 — revId={} reviewer={} conclusion={} reports={}",
+                revId, reviewerId, conclusionCd, advrIds);
     }
 
     private void updateRiskScore(Long reviewerId, String analysisType, String conclusionCd) {

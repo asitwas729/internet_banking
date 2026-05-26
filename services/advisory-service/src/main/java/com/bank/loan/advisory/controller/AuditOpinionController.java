@@ -2,6 +2,7 @@ package com.bank.loan.advisory.controller;
 
 import com.bank.common.web.ApiResponse;
 import com.bank.loan.advisory.dto.AiAuditOpinionResponse;
+import com.bank.loan.advisory.dto.QuarantineReportResponse;
 import com.bank.loan.advisory.dto.ReviewerRiskScoreResponse;
 import com.bank.loan.advisory.service.AdvisoryRoleGuard;
 import com.bank.loan.advisory.service.AuditOpinionQueryService;
@@ -74,5 +75,14 @@ public class AuditOpinionController {
             @RequestHeader(value = "X-Actor-Role", required = false) String roleHeader) {
         roleGuard.requireAuditorOrAdmin(roleHeader);
         return ApiResponse.ok(queryService.topByCompliance(limit));
+    }
+
+    @Operation(summary = "격리(Quarantine) 리포트 목록",
+            description = "AI 감사 결론이 BIAS_SUSPECTED 또는 VIOLATION_SUSPECTED 인 리포트. quarantined_at 최신순. auditor/admin 권한.")
+    @GetMapping("/quarantine")
+    public ApiResponse<List<QuarantineReportResponse>> quarantinedReports(
+            @RequestHeader(value = "X-Actor-Role", required = false) String roleHeader) {
+        roleGuard.requireAuditorOrAdmin(roleHeader);
+        return ApiResponse.ok(queryService.quarantinedReports());
     }
 }
