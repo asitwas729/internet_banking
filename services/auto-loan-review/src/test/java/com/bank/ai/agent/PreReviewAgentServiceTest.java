@@ -1,5 +1,6 @@
 package com.bank.ai.agent;
 
+import com.bank.ai.agent.guard.SemanticDisagreementDetector;
 import com.bank.ai.llm.client.LlmCallException;
 import com.bank.ai.llm.client.LlmClient;
 import com.bank.ai.llm.client.LlmRequest;
@@ -7,6 +8,7 @@ import com.bank.ai.llm.config.AgentProperties;
 import com.bank.ai.llm.purpose.PurposeAnalysis;
 import com.bank.ai.llm.purpose.PurposeAnalysisInput;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
+import com.bank.ai.llm.report.GroundingValidator;
 import com.bank.ai.llm.support.LlmRequestRateMeter;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.dto.AutoReviewResponse;
@@ -26,6 +28,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,6 +46,8 @@ class PreReviewAgentServiceTest {
     @Mock LlmClient llmClient;
     @Mock AutoReviewService reviewService;
     @Mock PurposeAnalysisService purposeAnalysisService;
+    @Mock GroundingValidator groundingValidator;
+    @Mock SemanticDisagreementDetector disagreementDetector;
 
     private AgentProperties enabledProps;
     private PreReviewAgentService service;
@@ -51,7 +56,11 @@ class PreReviewAgentServiceTest {
     void setUp() {
         enabledProps = new AgentProperties(true, 6, 2, true, 0);
         service = new PreReviewAgentService(enabledProps, rateMeter, llmClient,
-                reviewService, purposeAnalysisService);
+                reviewService, purposeAnalysisService, groundingValidator, disagreementDetector);
+        // Track 3 정상 경로 기본 stub (Track1/2 에서는 미호출 — lenient)
+        lenient().when(groundingValidator.validateNumericClaims(any(), any()))
+                .thenReturn(GroundingValidator.ValidationResult.ok());
+        lenient().when(disagreementDetector.detect(any(), any())).thenReturn(false);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -214,12 +223,58 @@ class PreReviewAgentServiceTest {
     void Track3_LoopGuard_도구한도1일때_LOOP_GUARD_HIT() {
         var tightProps = new AgentProperties(true, 1, 2, true, 0);
         var tightService = new PreReviewAgentService(
-                tightProps, rateMeter, llmClient, reviewService, purposeAnalysisService);
+                tightProps, rateMeter, llmClient, reviewService, purposeAnalysisService,
+                groundingValidator, disagreementDetector);
 
         var result = tightService.run(1L, fullRequest(), track3Decision());
 
         assertThat(result.fallbackReason()).isEqualTo(FallbackReason.LOOP_GUARD_HIT);
         verify(reviewService, never()).review(any());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // A5 — RiskLevelDeriver / SemanticDisagreementDetector / validateNumericClaims
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    void Track3_decisionScore낮으면_HIGH_riskLevel() {
+        stubRateMeter(true);
+        stubReviewService(0.82, 0.10);
+        stubPurposeService(0.8, 0.7);
+        stubLlmSummary("요약");
+
+        // decisionScore=0.30 < 0.40 → HIGH 보정
+        var decision = new TrackDecision(Track.TRACK_3, List.of(), 0.55, 0.30, 0.347, 0.104, "회색지대");
+        var result = service.run(1L, fullRequest(), decision);
+
+        assertThat(result.riskLevel()).isEqualTo(RiskLevel.HIGH);
+    }
+
+    @Test
+    void Track3_disagreement_감지시_opinion에_반영() {
+        stubRateMeter(true);
+        stubReviewService(0.82, 0.10);
+        stubPurposeService(0.8, 0.7);
+        stubLlmSummary("요약");
+        when(disagreementDetector.detect(any(), any())).thenReturn(true);
+
+        var result = service.run(1L, fullRequest(), track3Decision());
+
+        assertThat(result.disagreement()).isTrue();
+    }
+
+    @Test
+    void Track3_grounding_실패시_GROUNDING_FAILED_fallback() {
+        stubRateMeter(true);
+        stubReviewService(0.82, 0.10);
+        stubPurposeService(0.8, 0.7);
+        stubLlmSummary("요약");
+        when(groundingValidator.validateNumericClaims(any(), any()))
+                .thenReturn(GroundingValidator.ValidationResult.fail(List.of("pdScore 드리프트")));
+
+        var result = service.run(1L, fullRequest(), track3Decision());
+
+        assertThat(result.fallbackReason()).isEqualTo(FallbackReason.GROUNDING_FAILED);
     }
 
     // ─────────────────────────────────────────────────────────────────────

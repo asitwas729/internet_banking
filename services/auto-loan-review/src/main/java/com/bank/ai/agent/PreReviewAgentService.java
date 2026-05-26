@@ -1,6 +1,7 @@
 package com.bank.ai.agent;
 
 import com.bank.ai.agent.guard.AgentLoopGuard;
+import com.bank.ai.agent.guard.SemanticDisagreementDetector;
 import com.bank.ai.agent.tools.PolicyFlagTool;
 import com.bank.ai.agent.tools.PurposeAnalysisTool;
 import com.bank.ai.agent.tools.RecomputeWithTermsTool;
@@ -9,6 +10,7 @@ import com.bank.ai.llm.client.LlmClient;
 import com.bank.ai.llm.client.LlmRequest;
 import com.bank.ai.llm.config.AgentProperties;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
+import com.bank.ai.llm.report.GroundingValidator;
 import com.bank.ai.llm.support.LlmRequestRateMeter;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.service.AutoReviewService;
@@ -52,6 +54,8 @@ public class PreReviewAgentService {
     private final LlmClient llmClient;
     private final AutoReviewService reviewService;
     private final PurposeAnalysisService purposeAnalysisService;
+    private final GroundingValidator groundingValidator;
+    private final SemanticDisagreementDetector disagreementDetector;
 
     /**
      * @param revId    loan_review PK (멱등성 체크 및 로그용)
@@ -107,18 +111,31 @@ public class PreReviewAgentService {
             String summary = generateReasoningSummary(
                     guard, request, decision, policyFlags, purpose, simulations, revId);
 
-            log.info("PreReviewAgentService: Track 3 완료 revId={} tools={} llm={}",
-                    revId, guard.getToolCallCount(), guard.getLlmCallCount());
+            RiskLevel riskLevel = RiskLevelDeriver.derive(decision);
+            boolean disagreement = disagreementDetector.detect(riskLevel, summary);
 
-            return AgentOpinion.of(
+            AgentOpinion opinion = AgentOpinion.of(
                     decisionScoreOrZero(decision),
                     decision.pd(),
-                    RiskLevel.from(decision.track()),
+                    riskLevel,
                     policyFlags,
                     summary,
                     simulations,
-                    false
+                    disagreement
             );
+
+            // 수치 클레임 그라운딩 검증
+            var groundingResult = groundingValidator.validateNumericClaims(opinion, decision);
+            if (!groundingResult.passed()) {
+                log.warn("PreReviewAgentService: GROUNDING_FAILED revId={} issues={}",
+                        revId, groundingResult.issues());
+                return AgentOpinion.fallback(FallbackReason.GROUNDING_FAILED);
+            }
+
+            log.info("PreReviewAgentService: Track 3 완료 revId={} tools={} llm={} disagreement={}",
+                    revId, guard.getToolCallCount(), guard.getLlmCallCount(), disagreement);
+
+            return opinion;
 
         } catch (Exception e) {
             log.error("PreReviewAgentService: Track 3 오류 revId={}", revId, e);
@@ -269,7 +286,7 @@ public class PreReviewAgentService {
         return AgentOpinion.of(
                 decisionScoreOrZero(decision),
                 decision.pd(),
-                RiskLevel.LOW,
+                RiskLevelDeriver.derive(decision),
                 flags,
                 "PD %.4f 가 안전여유 임계 이하로 자동 승인 권고 구간입니다.".formatted(decision.pd()),
                 List.of(),
@@ -282,7 +299,7 @@ public class PreReviewAgentService {
         return AgentOpinion.of(
                 decisionScoreOrZero(decision),
                 decision.pd(),
-                RiskLevel.HIGH,
+                RiskLevelDeriver.derive(decision),
                 flags,
                 "정책 위반 또는 높은 PD로 인해 심사 기준을 충족하지 못했습니다.",
                 List.of(),
