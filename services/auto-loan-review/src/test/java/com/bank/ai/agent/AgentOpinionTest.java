@@ -80,7 +80,8 @@ class AgentOpinionTest {
     @Test
     void PreReviewAgentService_killswitch_반환_확인() {
         var props = new com.bank.ai.llm.config.AgentProperties(false, 6, 2, true, 0);
-        var service = new PreReviewAgentService(props);
+        // enabled=false → 즉시 반환, 나머지 의존성 미사용
+        var service = new PreReviewAgentService(props, null, null, null, null);
 
         var result = service.run(1L, null, null);
 

@@ -56,6 +56,7 @@ public class StubLlmClient implements LlmClient {
             case "review_report_track1" -> renderReviewReport("TRACK_1", request.userContent());
             case "review_report_track2" -> renderReviewReport("TRACK_2", request.userContent());
             case "review_report_track3" -> renderReviewReport("TRACK_3", request.userContent());
+            case "agent_reasoning_summary" -> renderAgentReasoningSummary(request.userContent());
             default -> throw new LlmCallException(
                     "stub 은 promptId='" + request.promptId() + "' 미지원 — provider 구현 필요");
         };
@@ -74,6 +75,19 @@ public class StubLlmClient implements LlmClient {
                       : (tooShort ? "stub: 텍스트 짧음" : "stub: 정상 사유"));
         try {
             return objectMapper.writeValueAsString(out);
+        } catch (JsonProcessingException e) {
+            throw new LlmCallException("stub JSON 생성 실패", e);
+        }
+    }
+
+    /** 에이전트 추론 요약 stub — Track 3 정보에서 결정론적 요약 생성. */
+    private String renderAgentReasoningSummary(String userContent) {
+        boolean hasWarning = userContent.contains("_WARNING");
+        String summary = hasWarning
+                ? "[stub] 정책 경고 항목이 확인되어 위험도가 상승합니다. 심사원의 추가 검토가 필요합니다."
+                : "[stub] 심사 결과 회색지대에 해당하며 수치 지표가 안전 임계 근방입니다. 심사원 검토가 권고됩니다.";
+        try {
+            return objectMapper.writeValueAsString(java.util.Map.of("summary", summary));
         } catch (JsonProcessingException e) {
             throw new LlmCallException("stub JSON 생성 실패", e);
         }
