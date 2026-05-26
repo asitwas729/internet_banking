@@ -8,7 +8,14 @@ dependencies {
     // ── A1: Gemini OpenAI-compat LLM 클라이언트 ─────────────────────────
     implementation 'org.springframework.ai:spring-ai-openai:1.0.0'
 
+    // ── B1: Audit Log — JDBC + Flyway ────────────────────────────────────
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.flywaydb:flyway-core'
+
     // ── 통합 테스트 (L11) ────────────────────────────────────────────────
     testImplementation 'org.wiremock:wiremock-standalone:3.9.1'
     testImplementation 'org.awaitility:awaitility'
+
+    // ── B1 테스트: H2 인메모리 DB (Flyway 마이그레이션 검증) ─────────────
+    testRuntimeOnly 'com.h2database:h2'
 }

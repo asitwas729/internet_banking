@@ -3,6 +3,9 @@ package com.bank.ai.review.listener;
 import com.bank.ai.agent.AgentOpinion;
 import com.bank.ai.agent.FallbackReason;
 import com.bank.ai.agent.PreReviewAgentService;
+import com.bank.ai.audit.AgentAuditRecord;
+import com.bank.ai.audit.AuditLogProperties;
+import com.bank.ai.audit.AuditLogService;
 import com.bank.ai.llm.purpose.PurposeAnalysis;
 import com.bank.ai.llm.purpose.PurposeAnalysisInput;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
@@ -48,6 +51,8 @@ public class AutoReviewEventListener {
     private final ReviewReportService reviewReportService;
     private final PreReviewAgentService preReviewAgentService;
     private final LoanServiceClient loanServiceClient;
+    private final AuditLogService auditLogService;
+    private final AuditLogProperties auditLogProperties;
     private final ObjectMapper objectMapper;
 
     @Async("llmExecutor")
@@ -75,7 +80,10 @@ public class AutoReviewEventListener {
 
             String agentOpinionJson = serializeOpinion(opinion, event.revId());
 
-            // Step 4: loan-service 에 결과 전송
+            // Step 4: 감사 로그 기록 (REQUIRES_NEW — 메인 트랜잭션과 독립 커밋)
+            recordAudit(event, opinion);
+
+            // Step 5: loan-service 에 결과 전송
             loanServiceClient.updateReport(event.revId(),
                     new ReviewReportUpdateRequest("DONE", report, agentOpinionJson));
             log.info("Async LLM pipeline completed for revId: {}", event.revId());
@@ -92,6 +100,17 @@ public class AutoReviewEventListener {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+
+    private void recordAudit(AutoReviewEvaluatedEvent event, AgentOpinion opinion) {
+        try {
+            var auditRecord = AgentAuditRecord.from(
+                    event, opinion, objectMapper, auditLogProperties.includeRawLlmResponse());
+            auditLogService.record(auditRecord);
+        } catch (Exception e) {
+            // 감사 로그 저장 실패는 파이프라인을 중단하지 않음 — ERROR 로그만 기록
+            log.error("[Audit] 감사 로그 저장 실패 revId={} — 파이프라인 계속 진행", event.revId(), e);
+        }
+    }
 
     private AgentOpinion runAgentWithTimeout(AutoReviewEvaluatedEvent event) {
         var future = CompletableFuture.supplyAsync(

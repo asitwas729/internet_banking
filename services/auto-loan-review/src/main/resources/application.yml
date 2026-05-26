@@ -6,12 +6,34 @@ spring:
     name: auto-loan-review
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
+
+  # ---- PostgreSQL (B1 Audit Log) ----
+  datasource:
+    url: ${AI_DB_URL:jdbc:postgresql://localhost:5432/ai_db}
+    username: ${AI_DB_USER:ai}
+    password: ${AI_DB_PASSWORD:ai}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 3000
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
 ai:
+  # ---- B1: Audit Log ----
+  audit:
+    enabled: ${AI_AUDIT_ENABLED:true}
+    include-raw-llm-response: ${AI_AUDIT_RAW_LLM:false}   # LLM 원문 저장 여부 (PII 위험 ↑)
+
   inference:
     base-url: ${AI_INFERENCE_BASE_URL:http://localhost:8090}
 
