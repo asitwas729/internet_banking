@@ -1,0 +1,14 @@
+// auto-loan-review: 의존성/플러그인은 루트 build.gradle 의 subprojects 블록에서 일괄 관리.
+// 본 모듈은 RDB(JPA) 를 사용하지 않으므로 공통에서 들어오는 spring-data-jpa starter 만 제외.
+configurations.implementation {
+    exclude group: 'org.springframework.boot', module: 'spring-boot-starter-data-jpa'
+}
+
+dependencies {
+    // ── 통합 테스트 (L11) ────────────────────────────────────────────────
+    // WireMock: loan-service 콜백 HTTP 엔드포인트 스터빙
+    // standalone: Jetty 포함 패키지 — Spring Boot Tomcat 과 충돌 없이 별도 포트 구동
+    testImplementation 'org.wiremock:wiremock-standalone:3.9.1'
+    // Awaitility: 비동기 파이프라인 완료 대기 (Spring Boot BOM 관리 버전)
+    testImplementation 'org.awaitility:awaitility'
+}

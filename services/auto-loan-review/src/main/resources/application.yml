@@ -1,0 +1,112 @@
+server:
+  port: ${AI_APP_PORT:8086}
+
+spring:
+  application:
+    name: auto-loan-review
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+ai:
+  inference:
+    base-url: ${AI_INFERENCE_BASE_URL:http://localhost:8090}
+
+  # ---- LLM 파이프라인 (Phase 1.5/1.6) ----
+  # plan/llm-pipeline.md §0 의 운영 원칙: kill switch + provider 추상화 + 토큰 cap.
+  # 현 단계는 stub provider 만 — 운영 cutover 시 vertex/anthropic 로 변경.
+  llm:
+    enabled: ${AI_LLM_ENABLED:true}            # kill switch — false 면 모든 LLM 단계 우회 (template fallback)
+    provider: ${AI_LLM_PROVIDER:stub}          # stub / vertex / anthropic
+    model: ${AI_LLM_MODEL:stub-v1}             # provider 별 모델명 (vertex: gemini-2.5-flash 등)
+    max-tokens: 512
+    temperature: 0.0
+    daily-token-cap: 1000000                   # plan §9 — 초과 시 TemplateFallback 으로 우회
+    # 모델별 USD/백만 토큰 단가 — LlmCostMeter llm.cost.usd.daily 산출용 (Phase 1.6 L3)
+    # 운영 provider 도입 시 갱신 필요.
+    cost-rates-usd-per-million-tokens:
+      stub-v1:         { input: 0.000, output: 0.000 }
+      gemini-2.5-flash: { input: 0.075, output: 0.300 }
+      claude-haiku-4-5: { input: 1.000, output: 5.000 }
+
+  # ---- LLM 리포트 grounding 용 인라인 정책 텍스트 (Phase 1.5/1.6) ----
+  # plan/llm-pipeline.md §14 — Phase 1.7 RAG 도입 전엔 인라인. 본 id 가 citation source.
+  # 정책 변경 시 본 섹션만 갱신 + 재기동.
+  policy:
+    inline:
+      MORT_DSR_LIMIT_V1:
+        text: "주담대 DSR 한도는 자행 신용정책서 §3.1.2 에 따라 40% 이하."
+        source: "internal_policy_2026q2"
+      MORT_LTV_LIMIT_V1:
+        text: "주담대 LTV 한도는 70% (생애최초 80%)."
+        source: "internal_policy_2026q2"
+      CRED_SCORE_MIN_V1:
+        text: "자행 정책 최저 신용점수: NICE 600, KCB 600."
+        source: "internal_policy_2026q2"
+      DELINQ_24M_BAR_V1:
+        text: "24개월 내 진행중 연체 1건 이상 시 즉시 반려 (신용정보법 §32 운영 기준)."
+        source: "internal_policy_2026q2"
+      AGE_MIN_V1:
+        text: "신청 자격 최소 연령 19세 (민법 성인 기준)."
+        source: "civil_law_§4"
+      PD_THRESHOLD_MATRIX_V1:
+        text: "상품·세그먼트별 PD 임계치는 신용정책위원회 분기 의결의 정책 매트릭스에 따른다."
+        source: "internal_policy_2026q2"
+      DECISION_CONFIDENCE_GUIDANCE_V1:
+        text: "decision 모델 신뢰도 ≥ 0.95 ∧ PD 안전여유 이하 시 강한 자동 승인 권고."
+        source: "internal_policy_2026q2"
+      AUTO_REVIEW_GOVERNANCE_V1:
+        text: "ML 모델은 변별력 산출만 수행 — 모든 의사결정은 정책 매트릭스 + Rule Engine 결정론 로직."
+        source: "internal_policy_2026q2"
+
+  # ---- RuleEngine (자동심사 트랙 분기 정책) ----
+  # 신용정책위가 분기 리뷰로 변경. 본 값은 plan banking-review-llm §4 의
+  # 자행 정책서 기본값 + H6 (hmda_tx_v1) 측정값.
+  rule-engine:
+    enabled: ${AI_RULE_ENGINE_ENABLED:true}        # kill switch — false 면 /evaluate 503
+    shadow-mode: ${AI_SHADOW_MODE:false}           # plan §9 운영 첫 2개월 측정용
+    hard-constraints:
+      dsr-max: 0.40             # 부채상환비율 한도 (주담대 기준)
+      ltv-max: 0.70             # 담보인정비율 한도 (주담대 기준)
+      credit-score-min: 600     # NICE/KCB 최저 점수
+      delinquency-24m-max: 0    # 24개월 진행중 연체 허용 건수
+      age-min: 19               # 성인 기준
+    safety-margin-ratio: 0.30   # Track 1 자동승인 진입 여유 (pd ≤ τ × 0.30)
+    default-pd-threshold: 0.50  # 매트릭스에 없는 (product, segment) 의 fallback
+    decision-strong-threshold: 0.95  # P(APPROVE) ≥ 본 값 ∧ pd ≤ safetyTau 일 때만 Track 1 (plan §5.3)
+    decision-reject-threshold: 0.20  # P(APPROVE) ≤ 본 값 이면 Track 2 보조 사유
+    # H6 hmda_tx_v1 측정값 (post-processing equalized, 4/5ths PASS).
+    # 다른 상품(CRED_001/BIZ_001/CARD_001/EMER_001/HOME_001) 은 default 사용 — TODO 신용정책위 결정.
+    pd-threshold-matrix:
+      MORT_001:
+        precarious: 0.991
+        regular: 0.347
+        self_employed: 0.407
+        senior: 0.788
+        young: 0.750
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+# ---- OpenAPI / Swagger UI ----
+# 접속: http://localhost:${AI_APP_PORT:8086}/swagger-ui.html
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    try-it-out-enabled: true
+  packages-to-scan: com.bank.ai
+  default-produces-media-type: application/json
