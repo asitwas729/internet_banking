@@ -151,6 +151,8 @@ class AutoReviewPipelineSmokeTest {
         assertThat(callbackReq.status()).isEqualTo("DONE");
         assertThat(callbackReq.report()).isNotNull();
         assertThat(callbackReq.report().track().name()).isEqualTo("TRACK_1"); // StubLlmClient 산출
+        assertThat(callbackReq.agentOpinionJson()).isNotNull()
+                .contains("schema_version"); // AgentOpinion 직렬화 검증
     }
 
     // ── TC 3: revId null → 비동기 파이프라인 스킵 ────────────────────────
