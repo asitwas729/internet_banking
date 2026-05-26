@@ -14,7 +14,7 @@ import java.time.OffsetDateTime;
 @Table(name = "ai_audit_opinion")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
-@Builder
+@Builder(toBuilder = true)
 public class AiAuditOpinion {
 
     public static final String TYPE_BIAS        = "BIAS_DETECTION";
@@ -31,7 +31,7 @@ public class AiAuditOpinion {
     @Column(name = "opinion_id")
     private Long opinionId;
 
-    @Column(name = "advr_id", nullable = false)
+    @Column(name = "advr_id")
     private Long advrId;
 
     @Column(name = "rev_id", nullable = false)

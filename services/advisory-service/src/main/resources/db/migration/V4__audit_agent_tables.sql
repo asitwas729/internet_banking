@@ -6,7 +6,7 @@
 
 CREATE TABLE ai_audit_opinion (
     opinion_id          BIGSERIAL     PRIMARY KEY,
-    advr_id             BIGINT        NOT NULL REFERENCES review_advisory_report(advr_id) ON DELETE NO ACTION,
+    advr_id             BIGINT,
     rev_id              BIGINT        NOT NULL,
     reviewer_id         BIGINT,
     analysis_type_cd    VARCHAR(50)   NOT NULL,   -- BIAS_DETECTION | COMPLIANCE_VERIFICATION

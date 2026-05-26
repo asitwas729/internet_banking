@@ -5,11 +5,6 @@ import com.bank.loan.advisory.domain.ReviewAdvisorySignal;
 import com.bank.loan.advisory.domain.audit.AiAuditOpinion;
 import com.bank.loan.advisory.domain.audit.ReviewerRiskScore;
 import com.bank.loan.advisory.dto.PolicyCitationResponse;
-import com.bank.loan.advisory.engine.rules.BiasApprovalRateDeviationRule;
-import com.bank.loan.advisory.engine.rules.BiasRejectRateDeviationRule;
-import com.bank.loan.advisory.engine.rules.DsrThresholdOverrideRule;
-import com.bank.loan.advisory.engine.rules.LtvThresholdOverrideRule;
-import com.bank.loan.advisory.engine.rules.PeerDecisionDivergenceRule;
 import com.bank.loan.advisory.gateway.AiGatewayClient;
 import com.bank.loan.advisory.gateway.GatewayAnalysisRequest;
 import com.bank.loan.advisory.gateway.GatewayAnalysisRequest.GatewayRagChunk;
@@ -32,14 +27,15 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * 감사/공정성 Agent. 룰 엔진이 WARN 이상 리포트를 발행한 뒤 호출.
  *
  * 처리 순서:
- *   1. 리포트·신호 로드 → BIAS / COMPLIANCE 그룹 분류
+ *   1. 리포트·신호 로드 → advisoryTypeCd 기준으로 BIAS / COMPLIANCE 그룹 분류
+ *      - "BIAS_DETECTION"    → BIAS_DETECTION 분석
+ *      - 그 외 (REREVIEW_RECOMMEND 등) → COMPLIANCE_VERIFICATION 분석
  *   2. 심사관 의견서(revRemark) 로드 + PII 마스킹
  *   3. 정책 RAG 청크 조회
  *   4. review-ai-gateway 호출 (best-effort — 실패 시 경고만)
@@ -50,15 +46,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AuditFairnessAgent {
 
-    private static final Set<String> BIAS_RULES = Set.of(
-            BiasApprovalRateDeviationRule.RULE_CD,
-            BiasRejectRateDeviationRule.RULE_CD,
-            PeerDecisionDivergenceRule.RULE_CD
-    );
-    private static final Set<String> COMPLIANCE_RULES = Set.of(
-            DsrThresholdOverrideRule.RULE_CD,
-            LtvThresholdOverrideRule.RULE_CD
-    );
+    static final String ADVISORY_TYPE_BIAS = "BIAS_DETECTION";
 
     private final ReviewAdvisoryReportRepository  reportRepo;
     private final ReviewAdvisorySignalRepository  signalRepo;
@@ -79,14 +67,11 @@ public class AuditFairnessAgent {
 
         if (reports.isEmpty()) return;
 
-        // revId + reviewerId 기준으로 그룹화
         Map<Long, List<ReviewAdvisoryReport>> byRevId = reports.stream()
                 .collect(Collectors.groupingBy(ReviewAdvisoryReport::getRevId));
 
         for (Map.Entry<Long, List<ReviewAdvisoryReport>> entry : byRevId.entrySet()) {
-            Long revId = entry.getKey();
-            List<ReviewAdvisoryReport> revReports = entry.getValue();
-            processRevGroup(revId, revReports);
+            processRevGroup(entry.getKey(), entry.getValue());
         }
     }
 
@@ -97,25 +82,25 @@ public class AuditFairnessAgent {
                 .findFirst().orElse(null);
 
         String maskedOpinion = loadMaskedOpinion(revId);
-        List<GatewaySignalSummary> allSignals = loadSignals(reports);
 
-        List<GatewaySignalSummary> biasSignals = allSignals.stream()
-                .filter(s -> BIAS_RULES.contains(s.ruleCd())).toList();
-        List<GatewaySignalSummary> complianceSignals = allSignals.stream()
-                .filter(s -> COMPLIANCE_RULES.contains(s.ruleCd())).toList();
+        // advisoryTypeCd 기준으로 BIAS / COMPLIANCE 그룹 분리
+        List<ReviewAdvisoryReport> biasReports = reports.stream()
+                .filter(r -> ADVISORY_TYPE_BIAS.equals(r.getAdvisoryTypeCd())).toList();
+        List<ReviewAdvisoryReport> complianceReports = reports.stream()
+                .filter(r -> !ADVISORY_TYPE_BIAS.equals(r.getAdvisoryTypeCd())).toList();
 
-        Long primaryAdvrId = reports.get(0).getAdvrId();
-
-        if (!biasSignals.isEmpty()) {
-            List<GatewayRagChunk> ragChunks = fetchRagChunks(primaryAdvrId, "BIAS", biasSignals);
-            callAndSave(revId, reviewerId, primaryAdvrId,
-                    AiAuditOpinion.TYPE_BIAS, biasSignals, maskedOpinion, ragChunks);
+        if (!biasReports.isEmpty()) {
+            Long advrId = biasReports.get(0).getAdvrId();
+            List<GatewaySignalSummary> signals = loadSignals(biasReports);
+            List<GatewayRagChunk> chunks = fetchRagChunks(advrId, AiAuditOpinion.TYPE_BIAS, signals);
+            callAndSave(revId, reviewerId, advrId, AiAuditOpinion.TYPE_BIAS, signals, maskedOpinion, chunks);
         }
 
-        if (!complianceSignals.isEmpty()) {
-            List<GatewayRagChunk> ragChunks = fetchRagChunks(primaryAdvrId, "COMPLIANCE", complianceSignals);
-            callAndSave(revId, reviewerId, primaryAdvrId,
-                    AiAuditOpinion.TYPE_COMPLIANCE, complianceSignals, maskedOpinion, ragChunks);
+        if (!complianceReports.isEmpty()) {
+            Long advrId = complianceReports.get(0).getAdvrId();
+            List<GatewaySignalSummary> signals = loadSignals(complianceReports);
+            List<GatewayRagChunk> chunks = fetchRagChunks(advrId, AiAuditOpinion.TYPE_COMPLIANCE, signals);
+            callAndSave(revId, reviewerId, advrId, AiAuditOpinion.TYPE_COMPLIANCE, signals, maskedOpinion, chunks);
         }
     }
 
@@ -128,7 +113,7 @@ public class AuditFairnessAgent {
             GatewayAnalysisResponse resp = gatewayClient.analyze(new GatewayAnalysisRequest(
                     analysisType, revId, reviewerId, maskedOpinion, signals, ragChunks));
 
-            AiAuditOpinion opinion = AiAuditOpinion.builder()
+            opinionRepo.save(AiAuditOpinion.builder()
                     .advrId(advrId)
                     .revId(revId)
                     .reviewerId(reviewerId)
@@ -139,13 +124,11 @@ public class AuditFairnessAgent {
                     .inputTokens(resp.inputTokens())
                     .outputTokens(resp.outputTokens())
                     .generatedAt(OffsetDateTime.now())
-                    .build();
-            opinionRepo.save(opinion);
+                    .build());
 
             if (reviewerId != null) {
                 updateRiskScore(reviewerId, analysisType, resp.conclusion());
             }
-
             log.info("감사 의견 저장 — revId={} type={} conclusion={} confidence={}",
                     revId, analysisType, resp.conclusion(), resp.confidenceScore());
         } catch (Exception e) {
@@ -157,7 +140,6 @@ public class AuditFairnessAgent {
     private void updateRiskScore(Long reviewerId, String analysisType, String conclusionCd) {
         ReviewerRiskScore score = riskScoreRepo.findByReviewerId(reviewerId)
                 .orElseGet(() -> ReviewerRiskScore.init(reviewerId));
-
         if (AiAuditOpinion.TYPE_BIAS.equals(analysisType)) {
             score.applyBiasConclusion(conclusionCd);
         } else {
@@ -176,8 +158,7 @@ public class AuditFairnessAgent {
     private List<GatewaySignalSummary> loadSignals(List<ReviewAdvisoryReport> reports) {
         List<GatewaySignalSummary> result = new ArrayList<>();
         for (ReviewAdvisoryReport report : reports) {
-            List<ReviewAdvisorySignal> signals = signalRepo.findByAdvrIdOrderByObservedAtAsc(report.getAdvrId());
-            for (ReviewAdvisorySignal s : signals) {
+            for (ReviewAdvisorySignal s : signalRepo.findByAdvrIdOrderByObservedAtAsc(report.getAdvrId())) {
                 result.add(new GatewaySignalSummary(
                         report.getAdvisoryTypeCd(),
                         report.getSeverityCd(),
@@ -194,7 +175,7 @@ public class AuditFairnessAgent {
                                                    List<GatewaySignalSummary> signals) {
         try {
             String query = signals.stream()
-                    .map(GatewaySignalSummary::ruleCd)
+                    .map(GatewaySignalSummary::signalMetric)
                     .collect(Collectors.joining(" "));
             PolicyCitationResponse citation = citationRetriever.retrieve(advrId, type, query, null);
             return citation.citations().stream()
