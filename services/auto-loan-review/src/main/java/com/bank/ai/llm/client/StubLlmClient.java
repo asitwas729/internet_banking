@@ -57,6 +57,7 @@ public class StubLlmClient implements LlmClient {
             case "review_report_track2" -> renderReviewReport("TRACK_2", request.userContent());
             case "review_report_track3" -> renderReviewReport("TRACK_3", request.userContent());
             case "agent_reasoning_summary" -> renderAgentReasoningSummary(request.userContent());
+            case "rejection_reason_draft" -> renderRejectionReasonDraft(request.userContent());
             default -> throw new LlmCallException(
                     "stub 은 promptId='" + request.promptId() + "' 미지원 — provider 구현 필요");
         };
@@ -88,6 +89,23 @@ public class StubLlmClient implements LlmClient {
                 : "[stub] 심사 결과 회색지대에 해당하며 수치 지표가 안전 임계 근방입니다. 심사원 검토가 권고됩니다.";
         try {
             return objectMapper.writeValueAsString(java.util.Map.of("summary", summary));
+        } catch (JsonProcessingException e) {
+            throw new LlmCallException("stub JSON 생성 실패", e);
+        }
+    }
+
+    /** 거절 통보문 초안 stub — 사유 키워드로 hard fail / PD 초과 분기. */
+    private String renderRejectionReasonDraft(String userContent) {
+        boolean hardFail = userContent.contains("DSR_EXCEEDED")
+                || userContent.contains("LTV_EXCEEDED")
+                || userContent.contains("CREDIT_SCORE_BELOW_MIN")
+                || userContent.contains("DELINQUENCY_24M_PRESENT")
+                || userContent.contains("AGE_BELOW_MIN");
+        String notice = hardFail
+                ? "[stub] 귀하의 신청은 담보비율 또는 연체 이력 기준을 충족하지 않아 반려 처리되었습니다."
+                : "[stub] 귀하의 신청은 신용위험 모델 평가 결과 PD 임계를 초과하여 반려 처리되었습니다.";
+        try {
+            return objectMapper.writeValueAsString(java.util.Map.of("notice", notice));
         } catch (JsonProcessingException e) {
             throw new LlmCallException("stub JSON 생성 실패", e);
         }
