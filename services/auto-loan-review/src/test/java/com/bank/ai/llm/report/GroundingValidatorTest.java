@@ -1,7 +1,12 @@
 package com.bank.ai.llm.report;
 
+import com.bank.ai.agent.AgentOpinion;
+import com.bank.ai.agent.FallbackReason;
+import com.bank.ai.agent.RiskLevel;
+import com.bank.ai.agent.SimulationResult;
 import com.bank.ai.llm.policy.PolicyIndex;
 import com.bank.ai.rule.domain.Track;
+import com.bank.ai.rule.domain.TrackDecision;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -92,5 +97,79 @@ class GroundingValidatorTest {
                 null);
 
         assertThat(validator.validate(r).passed()).isFalse();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // validateNumericClaims (A5)
+    // ─────────────────────────────────────────────────────────────────────
+
+    private static final TrackDecision TRACK3_DECISION =
+            new TrackDecision(Track.TRACK_3, List.of(), 0.35, 0.65, 0.347, 0.104, "회색지대");
+
+    private static AgentOpinion validOpinion() {
+        return AgentOpinion.of(0.65, 0.35, RiskLevel.MEDIUM, List.of(), "요약",
+                List.of(new SimulationResult("loan_amount_reduction_20pct",
+                        8000L, 60, 0.75, 0.25, "risk_reduced", "제안", false)),
+                false);
+    }
+
+    @Test
+    void 정상_의견은_수치검증_통과() {
+        assertThat(validator.validateNumericClaims(validOpinion(), TRACK3_DECISION).passed()).isTrue();
+    }
+
+    @Test
+    void fallback_의견은_수치검증_건너뜀() {
+        var fallback = AgentOpinion.fallback(FallbackReason.AGENT_DISABLED);
+        assertThat(validator.validateNumericClaims(fallback, TRACK3_DECISION).passed()).isTrue();
+    }
+
+    @Test
+    void decisionScore_범위초과시_실패() {
+        var opinion = AgentOpinion.of(1.5, 0.35, RiskLevel.MEDIUM, List.of(), "요약",
+                List.of(), false);
+        var result = validator.validateNumericClaims(opinion, TRACK3_DECISION);
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).anyMatch(s -> s.contains("decisionScore 범위 초과"));
+    }
+
+    @Test
+    void pdScore_범위초과시_실패() {
+        var opinion = AgentOpinion.of(0.65, -0.1, RiskLevel.MEDIUM, List.of(), "요약",
+                List.of(), false);
+        var result = validator.validateNumericClaims(opinion, TRACK3_DECISION);
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).anyMatch(s -> s.contains("pdScore 범위 초과"));
+    }
+
+    @Test
+    void decisionScore_드리프트_허용오차초과시_실패() {
+        // decision에서 0.65이지만 opinion에 0.99 입력
+        var opinion = AgentOpinion.of(0.99, 0.35, RiskLevel.MEDIUM, List.of(), "요약",
+                List.of(), false);
+        var result = validator.validateNumericClaims(opinion, TRACK3_DECISION);
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).anyMatch(s -> s.contains("decisionScore 드리프트"));
+    }
+
+    @Test
+    void pdScore_드리프트_허용오차초과시_실패() {
+        // decision.pd=0.35이지만 opinion에 0.80 입력
+        var opinion = AgentOpinion.of(0.65, 0.80, RiskLevel.MEDIUM, List.of(), "요약",
+                List.of(), false);
+        var result = validator.validateNumericClaims(opinion, TRACK3_DECISION);
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).anyMatch(s -> s.contains("pdScore 드리프트"));
+    }
+
+    @Test
+    void 시뮬레이션_점수_범위초과시_실패() {
+        var opinion = AgentOpinion.of(0.65, 0.35, RiskLevel.MEDIUM, List.of(), "요약",
+                List.of(new SimulationResult("loan_amount_reduction_20pct",
+                        8000L, 60, 1.5, 0.25, "risk_reduced", "제안", false)),
+                false);
+        var result = validator.validateNumericClaims(opinion, TRACK3_DECISION);
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).anyMatch(s -> s.contains("simulation") && s.contains("decisionScore 범위 초과"));
     }
 }
