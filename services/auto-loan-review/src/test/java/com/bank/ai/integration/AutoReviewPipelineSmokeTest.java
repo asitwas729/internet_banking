@@ -52,6 +52,11 @@ import static org.mockito.Mockito.times;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "ai.llm.provider=stub",
+                "spring.datasource.url=jdbc:h2:mem:smokedb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;NON_KEYWORDS=VALUE,YEAR",
+                "spring.datasource.username=sa",
+                "spring.datasource.password=",
+                "spring.datasource.driver-class-name=org.h2.Driver",
+                "spring.flyway.locations=classpath:db/h2-migration",
                 "spring.autoconfigure.exclude=" +
                         "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration," +
                         "org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration"

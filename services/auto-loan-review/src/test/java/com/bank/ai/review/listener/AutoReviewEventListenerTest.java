@@ -4,6 +4,8 @@ import com.bank.ai.agent.AgentOpinion;
 import com.bank.ai.agent.FallbackReason;
 import com.bank.ai.agent.PreReviewAgentService;
 import com.bank.ai.agent.RiskLevel;
+import com.bank.ai.audit.AuditLogProperties;
+import com.bank.ai.audit.AuditLogService;
 import com.bank.ai.llm.purpose.PurposeAnalysis;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
 import com.bank.ai.llm.report.ReviewReport;
@@ -51,6 +53,8 @@ class AutoReviewEventListenerTest {
     private PreReviewAgentService preReviewAgentService;
     @Mock
     private LoanServiceClient loanServiceClient;
+    @Mock
+    private AuditLogService auditLogService;
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -73,7 +77,9 @@ class AutoReviewEventListenerTest {
     void setUp() {
         listener = new AutoReviewEventListener(
                 purposeAnalysisService, reviewReportService, preReviewAgentService,
-                loanServiceClient, objectMapper);
+                loanServiceClient, auditLogService,
+                new AuditLogProperties(true, false),
+                objectMapper);
     }
 
     private AutoReviewEvaluatedEvent event(Long revId) {
