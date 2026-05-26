@@ -12,6 +12,8 @@ import com.bank.ai.llm.purpose.PurposeAnalysisService;
 import com.bank.ai.llm.report.ReviewReport;
 import com.bank.ai.llm.report.ReviewReportInput;
 import com.bank.ai.llm.report.ReviewReportService;
+import com.bank.ai.metrics.AgentMetricsRecorder;
+import com.bank.ai.metrics.AgentOutcome;
 import com.bank.ai.review.client.LoanServiceClient;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.dto.ReviewReportUpdateRequest;
@@ -24,6 +26,9 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
@@ -53,6 +58,7 @@ public class AutoReviewEventListener {
     private final LoanServiceClient loanServiceClient;
     private final AuditLogService auditLogService;
     private final AuditLogProperties auditLogProperties;
+    private final AgentMetricsRecorder metricsRecorder;
     private final ObjectMapper objectMapper;
 
     @Async("llmExecutor")
@@ -75,13 +81,26 @@ public class AutoReviewEventListener {
             log.info("Review report generated: track={}", report.track());
 
             // Step 3: PreReviewAgentService (30s 타임아웃)
+            Instant agentStart = Instant.now();
             AgentOpinion opinion = runAgentWithTimeout(event);
+            Duration agentDuration = Duration.between(agentStart, Instant.now());
             log.info("Agent opinion: riskLevel={} fallback={}", opinion.riskLevel(), opinion.fallbackReason());
+
+            // Step 3-M: 에이전트 메트릭 기록
+            AgentOutcome agentOutcome = opinion.fallbackReason() != null
+                    ? AgentOutcome.FALLBACK : AgentOutcome.SUCCESS;
+            metricsRecorder.recordRun(event.decision().track(), agentOutcome, agentDuration);
+            if (opinion.fallbackReason() != null) {
+                metricsRecorder.recordFallback(opinion.fallbackReason());
+            }
+            if (opinion.disagreement()) {
+                metricsRecorder.recordDisagreement(event.decision().track());
+            }
 
             String agentOpinionJson = serializeOpinion(opinion, event.revId());
 
             // Step 4: 감사 로그 기록 (REQUIRES_NEW — 메인 트랜잭션과 독립 커밋)
-            recordAudit(event, opinion);
+            recordAudit(event, opinion, agentOpinionJson);
 
             // Step 5: loan-service 에 결과 전송
             loanServiceClient.updateReport(event.revId(),
@@ -90,6 +109,7 @@ public class AutoReviewEventListener {
 
         } catch (Exception e) {
             log.error("Async LLM pipeline failed for revId: {}", event.revId(), e);
+            metricsRecorder.recordRun(event.decision().track(), AgentOutcome.ERROR, Duration.ZERO);
             try {
                 loanServiceClient.updateReport(event.revId(),
                         new ReviewReportUpdateRequest("FAILED", null, null));
@@ -101,11 +121,18 @@ public class AutoReviewEventListener {
 
     // ─────────────────────────────────────────────────────────────────────
 
-    private void recordAudit(AutoReviewEvaluatedEvent event, AgentOpinion opinion) {
+    private void recordAudit(AutoReviewEvaluatedEvent event, AgentOpinion opinion,
+                             String agentOpinionJson) {
         try {
             var auditRecord = AgentAuditRecord.from(
                     event, opinion, objectMapper, auditLogProperties.includeRawLlmResponse());
             auditLogService.record(auditRecord);
+
+            // 감사 로그 크기 메트릭 — opinionJson UTF-8 byte 기준
+            if (agentOpinionJson != null) {
+                metricsRecorder.recordAuditLogSize(
+                        agentOpinionJson.getBytes(StandardCharsets.UTF_8).length);
+            }
         } catch (Exception e) {
             // 감사 로그 저장 실패는 파이프라인을 중단하지 않음 — ERROR 로그만 기록
             log.error("[Audit] 감사 로그 저장 실패 revId={} — 파이프라인 계속 진행", event.revId(), e);

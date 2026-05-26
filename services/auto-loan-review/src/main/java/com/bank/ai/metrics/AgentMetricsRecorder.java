@@ -1,0 +1,163 @@
+package com.bank.ai.metrics;
+
+import com.bank.ai.agent.FallbackReason;
+import com.bank.ai.rule.domain.HardFailReason;
+import com.bank.ai.rule.domain.Track;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.time.Duration;
+
+/**
+ * AI 파이프라인 Micrometer 메트릭 중앙 기록기 — phase-b-operational.md §B2.
+ *
+ * <p>메트릭 목록 (14종):
+ * <ul>
+ *   <li>{@code ai.agent.runs.total}         Counter   track, outcome</li>
+ *   <li>{@code ai.agent.latency.seconds}     Timer     track, outcome</li>
+ *   <li>{@code ai.agent.tool.calls.total}    Counter   tool_name, status</li>
+ *   <li>{@code ai.agent.llm.calls.total}     Counter   model, outcome</li>
+ *   <li>{@code ai.agent.llm.latency.seconds} Timer     model</li>
+ *   <li>{@code ai.agent.tokens.input.total}  Counter   model</li>
+ *   <li>{@code ai.agent.tokens.output.total} Counter   model</li>
+ *   <li>{@code ai.agent.cost.usd.total}      Counter   model</li>
+ *   <li>{@code ai.agent.rpm.remaining}       Gauge     — (LlmRequestRateMeter 등록)</li>
+ *   <li>{@code ai.agent.rpd.remaining}       Gauge     — (LlmRequestRateMeter 등록)</li>
+ *   <li>{@code ai.agent.disagreement.total}  Counter   track</li>
+ *   <li>{@code ai.agent.fallback.total}      Counter   reason</li>
+ *   <li>{@code ai.agent.hard.fail.total}     Counter   reason</li>
+ *   <li>{@code ai.audit.log.size.bytes}      DistributionSummary  —</li>
+ * </ul>
+ *
+ * <p>rpm/rpd Gauge 는 {@code LlmRequestRateMeter#registerGauges()} 에서 이미 등록 — 여기선 제외.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class AgentMetricsRecorder {
+
+    private final MeterRegistry registry;
+
+    // ── 에이전트 실행 ────────────────────────────────────────────────────────
+
+    /**
+     * 에이전트 run 완료 기록 (카운터 + 타이머).
+     *
+     * @param track    트랙 분기 결과
+     * @param outcome  SUCCESS / FALLBACK / ERROR
+     * @param duration 전체 소요 시간
+     */
+    public void recordRun(Track track, AgentOutcome outcome, Duration duration) {
+        Counter.builder("ai.agent.runs.total")
+                .tag(AgentMetricsTags.TRACK, track.name())
+                .tag(AgentMetricsTags.OUTCOME, outcome.name())
+                .register(registry)
+                .increment();
+
+        Timer.builder("ai.agent.latency.seconds")
+                .tag(AgentMetricsTags.TRACK, track.name())
+                .tag(AgentMetricsTags.OUTCOME, outcome.name())
+                .register(registry)
+                .record(duration);
+    }
+
+    // ── 도구 호출 ────────────────────────────────────────────────────────────
+
+    /**
+     * 에이전트 도구(Tool) 호출 기록.
+     *
+     * @param toolName 도구 이름 (예: PolicyFlagTool, RecomputeWithTermsTool)
+     * @param success  성공 여부
+     */
+    public void recordToolCall(String toolName, boolean success) {
+        Counter.builder("ai.agent.tool.calls.total")
+                .tag(AgentMetricsTags.TOOL_NAME, toolName)
+                .tag(AgentMetricsTags.STATUS, success ? "OK" : "ERROR")
+                .register(registry)
+                .increment();
+    }
+
+    // ── LLM 호출 ─────────────────────────────────────────────────────────────
+
+    /**
+     * LLM 단일 호출 기록 (횟수 + 지연 + 토큰 + 비용).
+     *
+     * @param model   LLM 모델명 (예: stub-v1, gemini-2.5-flash)
+     * @param outcome SUCCESS / FALLBACK / ERROR
+     * @param latency 호출 소요 시간
+     * @param cost    토큰·비용 집계 ({@link LlmCostSummary#ZERO} 허용)
+     */
+    public void recordLlmCall(String model, AgentOutcome outcome,
+                              Duration latency, LlmCostSummary cost) {
+        Counter.builder("ai.agent.llm.calls.total")
+                .tag(AgentMetricsTags.MODEL, model)
+                .tag(AgentMetricsTags.OUTCOME, outcome.name())
+                .register(registry)
+                .increment();
+
+        Timer.builder("ai.agent.llm.latency.seconds")
+                .tag(AgentMetricsTags.MODEL, model)
+                .register(registry)
+                .record(latency);
+
+        if (cost.inputTokens() > 0) {
+            Counter.builder("ai.agent.tokens.input.total")
+                    .tag(AgentMetricsTags.MODEL, model)
+                    .register(registry)
+                    .increment(cost.inputTokens());
+        }
+        if (cost.outputTokens() > 0) {
+            Counter.builder("ai.agent.tokens.output.total")
+                    .tag(AgentMetricsTags.MODEL, model)
+                    .register(registry)
+                    .increment(cost.outputTokens());
+        }
+        if (cost.estimatedUsdCost() > 0) {
+            Counter.builder("ai.agent.cost.usd.total")
+                    .tag(AgentMetricsTags.MODEL, model)
+                    .register(registry)
+                    .increment(cost.estimatedUsdCost());
+        }
+    }
+
+    // ── 폴백·불일치·하드페일 ──────────────────────────────────────────────────
+
+    /** 에이전트 폴백 기록 (FallbackReason 별). */
+    public void recordFallback(FallbackReason reason) {
+        Counter.builder("ai.agent.fallback.total")
+                .tag(AgentMetricsTags.REASON, reason.name())
+                .register(registry)
+                .increment();
+    }
+
+    /** 에이전트 의견과 트랙 분기 불일치 기록. */
+    public void recordDisagreement(Track track) {
+        Counter.builder("ai.agent.disagreement.total")
+                .tag(AgentMetricsTags.TRACK, track.name())
+                .register(registry)
+                .increment();
+    }
+
+    /** RuleEngine 하드 페일 기록 (HardFailReason 별). */
+    public void recordHardFail(HardFailReason reason) {
+        Counter.builder("ai.agent.hard.fail.total")
+                .tag(AgentMetricsTags.REASON, reason.name())
+                .register(registry)
+                .increment();
+    }
+
+    // ── 감사 로그 ─────────────────────────────────────────────────────────────
+
+    /** 감사 로그 단건 크기 (UTF-8 bytes) 기록. */
+    public void recordAuditLogSize(int bytes) {
+        DistributionSummary.builder("ai.audit.log.size.bytes")
+                .baseUnit("bytes")
+                .register(registry)
+                .record(bytes);
+    }
+}

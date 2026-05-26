@@ -127,10 +127,14 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus
+        include: health,info,prometheus,metrics
   endpoint:
     health:
       show-details: always
+  metrics:
+    tags:
+      application: auto-loan-review
+      environment: ${SPRING_PROFILES_ACTIVE:local}
 
 # ---- OpenAPI / Swagger UI ----
 # 접속: http://localhost:${AI_APP_PORT:8086}/swagger-ui.html
