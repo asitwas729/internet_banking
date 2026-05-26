@@ -5,13 +5,17 @@ import Link from 'next/link'
 import AdminSidebar from '@/components/admin/AdminSidebar'
 import { AdminUser } from '@/lib/admin-mock-data'
 import {
-  MOCK_RISK_SCORES, MOCK_AUDIT_OPINIONS, MOCK_QUARANTINE,
-  biasRiskLevel, conclusionLabel, analysisTypeLabel,
-  ConclusionCd, AnalysisTypeCd,
-} from '@/lib/audit-mock-data'
+  fetchTopBiasRiskScores, fetchRecentOpinions, fetchQuarantineReports,
+  ReviewerRiskScoreDto, AiAuditOpinionDto, QuarantineReportDto,
+} from '@/lib/audit-api'
+import { biasRiskLevel, conclusionLabel, analysisTypeLabel, ConclusionCd, AnalysisTypeCd } from '@/lib/audit-mock-data'
 
 export default function AuditDashboardPage() {
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null)
+  const [riskScores, setRiskScores] = useState<ReviewerRiskScoreDto[]>([])
+  const [opinions,   setOpinions]   = useState<AiAuditOpinionDto[]>([])
+  const [quarantine, setQuarantine] = useState<QuarantineReportDto[]>([])
+  const [loading,    setLoading]    = useState(true)
 
   useEffect(() => {
     try {
@@ -20,14 +24,24 @@ export default function AuditDashboardPage() {
     } catch {}
   }, [])
 
+  useEffect(() => {
+    if (!adminUser) return
+    Promise.all([
+      fetchTopBiasRiskScores(20),
+      fetchRecentOpinions(20),
+      fetchQuarantineReports(),
+    ]).then(([scores, ops, quar]) => {
+      setRiskScores(scores)
+      setOpinions(ops)
+      setQuarantine(quar)
+    }).catch(() => {}).finally(() => setLoading(false))
+  }, [adminUser])
+
   if (!adminUser) return null
 
-  const suspectedOpinions  = MOCK_AUDIT_OPINIONS.filter(
-    (o) => o.conclusionCd === 'BIAS_SUSPECTED' || o.conclusionCd === 'VIOLATION_SUSPECTED',
-  )
-  const biasSuspected      = MOCK_AUDIT_OPINIONS.filter((o) => o.conclusionCd === 'BIAS_SUSPECTED').length
-  const violationSuspected = MOCK_AUDIT_OPINIONS.filter((o) => o.conclusionCd === 'VIOLATION_SUSPECTED').length
-  const highRiskReviewers  = MOCK_RISK_SCORES.filter((r) => r.biasScore >= 50 || r.complianceScore >= 40).length
+  const biasSuspected      = opinions.filter((o) => o.conclusionCd === 'BIAS_SUSPECTED').length
+  const violationSuspected = opinions.filter((o) => o.conclusionCd === 'VIOLATION_SUSPECTED').length
+  const highRiskReviewers  = riskScores.filter((r) => r.biasScore >= 50 || r.complianceScore >= 40).length
 
   return (
     <div className="flex min-h-screen bg-kb-beige-light">
@@ -48,7 +62,7 @@ export default function AuditDashboardPage() {
           <div className="grid grid-cols-4 gap-4">
             <SummaryCard
               label="격리 리포트"
-              value={MOCK_QUARANTINE.length}
+              value={quarantine.length}
               sub="재심사 대기"
               color="red"
               href="/admin/audit/quarantine"
@@ -57,6 +71,10 @@ export default function AuditDashboardPage() {
             <SummaryCard label="규정 위반 의심" value={violationSuspected} sub="VIOLATION_SUSPECTED" color="yellow" />
             <SummaryCard label="고위험 심사관" value={highRiskReviewers} sub="bias ≥ 50 또는 compliance ≥ 40" color="purple" />
           </div>
+
+          {loading && (
+            <p className="text-sm text-gray-400 text-center py-8">데이터 조회 중...</p>
+          )}
 
           {/* 심사관 위험도 순위 */}
           <section className="bg-white border border-kb-border rounded-lg shadow-sm">
@@ -70,8 +88,7 @@ export default function AuditDashboardPage() {
               <thead>
                 <tr className="bg-kb-beige-light text-xs text-kb-text-muted uppercase">
                   <th className="px-5 py-2.5 text-left font-medium w-8">#</th>
-                  <th className="px-5 py-2.5 text-left font-medium">심사관</th>
-                  <th className="px-5 py-2.5 text-left font-medium">부서</th>
+                  <th className="px-5 py-2.5 text-left font-medium">심사관 ID</th>
                   <th className="px-5 py-2.5 text-center font-medium">편향 스코어</th>
                   <th className="px-5 py-2.5 text-center font-medium">규정준수 스코어</th>
                   <th className="px-5 py-2.5 text-center font-medium">평가 건수</th>
@@ -80,13 +97,18 @@ export default function AuditDashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {MOCK_RISK_SCORES.slice().sort((a, b) => b.biasScore - a.biasScore).map((r, idx) => {
+                {riskScores.length === 0 && !loading ? (
+                  <tr>
+                    <td colSpan={7} className="px-5 py-8 text-center text-sm text-gray-400">
+                      심사관 위험도 데이터가 없습니다.
+                    </td>
+                  </tr>
+                ) : riskScores.map((r, idx) => {
                   const level = biasRiskLevel(r.biasScore)
                   return (
                     <tr key={r.reviewerId} className="hover:bg-kb-beige-light transition-colors">
                       <td className="px-5 py-3 text-gray-400 text-xs">{idx + 1}</td>
-                      <td className="px-5 py-3 font-medium text-gray-800">{r.reviewerName}</td>
-                      <td className="px-5 py-3 text-gray-500">{r.department}</td>
+                      <td className="px-5 py-3 font-mono text-xs text-gray-700">#{r.reviewerId}</td>
                       <td className="px-5 py-3 text-center">
                         <BiasScoreBar score={r.biasScore} level={level} />
                       </td>
@@ -94,7 +116,9 @@ export default function AuditDashboardPage() {
                         <ComplianceScoreBar score={r.complianceScore} />
                       </td>
                       <td className="px-5 py-3 text-center text-gray-600">{r.evaluationCount}건</td>
-                      <td className="px-5 py-3 text-gray-400 text-xs">{r.lastEvaluatedAt}</td>
+                      <td className="px-5 py-3 text-gray-400 text-xs">
+                        {r.lastEvaluatedAt ? new Date(r.lastEvaluatedAt).toLocaleString('ko-KR') : '-'}
+                      </td>
                       <td className="px-5 py-3 text-center">
                         <RiskLevelBadge level={level} />
                       </td>
@@ -117,7 +141,7 @@ export default function AuditDashboardPage() {
               <thead>
                 <tr className="bg-kb-beige-light text-xs text-kb-text-muted uppercase">
                   <th className="px-5 py-2.5 text-left font-medium">심사 ID</th>
-                  <th className="px-5 py-2.5 text-left font-medium">심사관</th>
+                  <th className="px-5 py-2.5 text-left font-medium">심사관 ID</th>
                   <th className="px-5 py-2.5 text-left font-medium">분석 유형</th>
                   <th className="px-5 py-2.5 text-left font-medium">결론</th>
                   <th className="px-5 py-2.5 text-center font-medium">신뢰도</th>
@@ -126,15 +150,21 @@ export default function AuditDashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {MOCK_AUDIT_OPINIONS.slice().sort((a, b) => b.generatedAt.localeCompare(a.generatedAt)).map((op) => (
+                {opinions.length === 0 && !loading ? (
+                  <tr>
+                    <td colSpan={7} className="px-5 py-8 text-center text-sm text-gray-400">
+                      AI 감사 의견이 없습니다.
+                    </td>
+                  </tr>
+                ) : opinions.map((op) => (
                   <tr key={op.opinionId} className="hover:bg-kb-beige-light transition-colors">
                     <td className="px-5 py-3 text-gray-500 font-mono text-xs">rev-{op.revId}</td>
-                    <td className="px-5 py-3 font-medium text-gray-800">{op.reviewerName}</td>
+                    <td className="px-5 py-3 font-mono text-xs text-gray-700">#{op.reviewerId}</td>
                     <td className="px-5 py-3">
-                      <AnalysisTypeBadge type={op.analysisTypeCd} />
+                      <AnalysisTypeBadge type={op.analysisTypeCd as AnalysisTypeCd} />
                     </td>
                     <td className="px-5 py-3">
-                      <ConclusionBadge cd={op.conclusionCd} />
+                      <ConclusionBadge cd={op.conclusionCd as ConclusionCd} />
                     </td>
                     <td className="px-5 py-3 text-center">
                       <ConfidenceBar score={op.confidenceScore} />
@@ -142,7 +172,9 @@ export default function AuditDashboardPage() {
                     <td className="px-5 py-3 text-gray-500 text-xs leading-relaxed max-w-xs">
                       <p className="line-clamp-2">{op.reasoningSummary}</p>
                     </td>
-                    <td className="px-5 py-3 text-gray-400 text-xs">{op.generatedAt}</td>
+                    <td className="px-5 py-3 text-gray-400 text-xs">
+                      {new Date(op.generatedAt).toLocaleString('ko-KR')}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -225,7 +257,7 @@ function ConclusionBadge({ cd }: { cd: ConclusionCd }) {
     INSUFFICIENT_DATA:   'bg-gray-100 text-gray-500 border border-gray-200',
   }
   return (
-    <span className={`text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap ${styles[cd]}`}>
+    <span className={`text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap ${styles[cd] ?? 'bg-gray-100 text-gray-500'}`}>
       {conclusionLabel(cd)}
     </span>
   )
@@ -237,7 +269,7 @@ function AnalysisTypeBadge({ type }: { type: AnalysisTypeCd }) {
     COMPLIANCE_VERIFICATION:  'bg-blue-100 text-blue-700',
   }
   return (
-    <span className={`text-xs px-2 py-0.5 rounded font-medium ${styles[type]}`}>
+    <span className={`text-xs px-2 py-0.5 rounded font-medium ${styles[type] ?? 'bg-gray-100 text-gray-500'}`}>
       {analysisTypeLabel(type)}
     </span>
   )

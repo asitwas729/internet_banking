@@ -4,16 +4,18 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import AdminSidebar from '@/components/admin/AdminSidebar'
 import { AdminUser } from '@/lib/admin-mock-data'
-import { MOCK_QUARANTINE, QuarantineReport } from '@/lib/audit-mock-data'
+import { fetchQuarantineReports, QuarantineReportDto } from '@/lib/audit-api'
 
-type FilterType = 'ALL' | 'BIAS_DETECTION' | 'REREVIEW_RECOMMEND'
+type FilterType = 'ALL' | 'BIAS_DETECTION' | 'COMPLIANCE_VERIFICATION'
 type FilterSev  = 'ALL' | 'WARN' | 'CRITICAL'
 
 export default function QuarantinePage() {
-  const [adminUser, setAdminUser] = useState<AdminUser | null>(null)
-  const [filterType, setFilterType] = useState<FilterType>('ALL')
-  const [filterSev,  setFilterSev]  = useState<FilterSev>('ALL')
-  const [selected,   setSelected]   = useState<QuarantineReport | null>(null)
+  const [adminUser,   setAdminUser]   = useState<AdminUser | null>(null)
+  const [reports,     setReports]     = useState<QuarantineReportDto[]>([])
+  const [loading,     setLoading]     = useState(true)
+  const [filterType,  setFilterType]  = useState<FilterType>('ALL')
+  const [filterSev,   setFilterSev]   = useState<FilterSev>('ALL')
+  const [selected,    setSelected]    = useState<QuarantineReportDto | null>(null)
 
   useEffect(() => {
     try {
@@ -22,9 +24,17 @@ export default function QuarantinePage() {
     } catch {}
   }, [])
 
+  useEffect(() => {
+    if (!adminUser) return
+    fetchQuarantineReports()
+      .then(setReports)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [adminUser])
+
   if (!adminUser) return null
 
-  const filtered = MOCK_QUARANTINE.filter((r) => {
+  const filtered = reports.filter((r) => {
     if (filterType !== 'ALL' && r.advisoryTypeCd !== filterType) return false
     if (filterSev  !== 'ALL' && r.severityCd      !== filterSev)  return false
     return true
@@ -61,7 +71,7 @@ export default function QuarantinePage() {
           <div className="bg-white border border-kb-border rounded-lg px-5 py-3.5 flex items-center gap-6">
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-gray-500">유형</span>
-              {(['ALL', 'BIAS_DETECTION', 'REREVIEW_RECOMMEND'] as FilterType[]).map((v) => (
+              {(['ALL', 'BIAS_DETECTION', 'COMPLIANCE_VERIFICATION'] as FilterType[]).map((v) => (
                 <button
                   key={v}
                   onClick={() => setFilterType(v)}
@@ -71,7 +81,7 @@ export default function QuarantinePage() {
                       : 'border-gray-200 text-gray-500 hover:border-gray-400'
                   }`}
                 >
-                  {v === 'ALL' ? '전체' : v === 'BIAS_DETECTION' ? '편향 탐지' : '재심사 권유'}
+                  {v === 'ALL' ? '전체' : v === 'BIAS_DETECTION' ? '편향 탐지' : '규정 준수'}
                 </button>
               ))}
             </div>
@@ -92,7 +102,9 @@ export default function QuarantinePage() {
                 </button>
               ))}
             </div>
-            <span className="ml-auto text-xs text-gray-400">{filtered.length}건</span>
+            <span className="ml-auto text-xs text-gray-400">
+              {loading ? '조회 중...' : `${filtered.length}건`}
+            </span>
           </div>
 
           {/* 테이블 + 상세 패널 */}
@@ -112,7 +124,13 @@ export default function QuarantinePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filtered.length === 0 ? (
+                  {loading ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
+                        데이터 조회 중...
+                      </td>
+                    </tr>
+                  ) : filtered.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
                         격리된 리포트가 없습니다.
@@ -129,7 +147,7 @@ export default function QuarantinePage() {
                       onClick={() => setSelected(selected?.advrId === r.advrId ? null : r)}
                     >
                       <td className="px-4 py-3 text-gray-500 font-mono text-xs">rev-{r.revId}</td>
-                      <td className="px-4 py-3 font-medium text-gray-800">{r.targetReviewerName}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-700">#{r.targetReviewerId}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-xs">
                         <span className="line-clamp-1">{r.advrTitle}</span>
                       </td>
@@ -139,7 +157,9 @@ export default function QuarantinePage() {
                       <td className="px-4 py-3 text-center">
                         <SeverityBadge sev={r.severityCd} />
                       </td>
-                      <td className="px-4 py-3 text-gray-400 text-xs">{r.quarantinedAt}</td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">
+                        {new Date(r.quarantinedAt).toLocaleString('ko-KR')}
+                      </td>
                       <td className="px-4 py-3 text-center">
                         <span className="text-xs text-blue-500 hover:underline">
                           {selected?.advrId === r.advrId ? '닫기' : '보기'}
@@ -162,12 +182,12 @@ export default function QuarantinePage() {
                 <div className="space-y-3 text-sm">
                   <DetailRow label="심사 ID"    value={`rev-${selected.revId}`} mono />
                   <DetailRow label="리포트 ID"  value={`advr-${selected.advrId}`} mono />
-                  <DetailRow label="대상 심사관" value={selected.targetReviewerName} />
+                  <DetailRow label="대상 심사관" value={`#${selected.targetReviewerId}`} mono />
                   <DetailRow label="심각도">
                     <SeverityBadge sev={selected.severityCd} />
                   </DetailRow>
-                  <DetailRow label="격리 시각" value={selected.quarantinedAt} />
-                  <DetailRow label="생성 시각" value={selected.generatedAt} />
+                  <DetailRow label="격리 시각" value={new Date(selected.quarantinedAt).toLocaleString('ko-KR')} />
+                  <DetailRow label="생성 시각" value={new Date(selected.generatedAt).toLocaleString('ko-KR')} />
                 </div>
 
                 <div className="border-t border-gray-100 pt-4">
@@ -202,7 +222,9 @@ export default function QuarantinePage() {
 function AdvisoryTypeBadge({ type }: { type: string }) {
   if (type === 'BIAS_DETECTION')
     return <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">편향 탐지</span>
-  return <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">재심사 권유</span>
+  if (type === 'COMPLIANCE_VERIFICATION')
+    return <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">규정 준수</span>
+  return <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">{type}</span>
 }
 
 function SeverityBadge({ sev }: { sev: 'WARN' | 'CRITICAL' }) {
