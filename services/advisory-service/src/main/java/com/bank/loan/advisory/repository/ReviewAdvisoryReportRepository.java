@@ -39,4 +39,12 @@ public interface ReviewAdvisoryReportRepository extends JpaRepository<ReviewAdvi
     default List<ReviewAdvisoryReport> findActiveByRevId(Long revId) {
         return findByRevIdAndAdvrStatusCdNotAndDeletedAtIsNull(revId, ReviewAdvisoryReport.STATUS_RESOLVED);
     }
+
+    List<ReviewAdvisoryReport> findByAdvrStatusCdAndDeletedAtIsNullOrderByQuarantinedAtDesc(String advrStatusCd);
+
+    /** AI 격리 신호 목록 — quarantined_at 최신순. */
+    default List<ReviewAdvisoryReport> findAllQuarantined() {
+        return findByAdvrStatusCdAndDeletedAtIsNullOrderByQuarantinedAtDesc(
+                ReviewAdvisoryReport.STATUS_QUARANTINE);
+    }
 }

@@ -23,6 +23,8 @@ import java.time.OffsetDateTime;
  *
  * advr_status_cd 라이프사이클:
  *   OPEN → VIEWED → ACKED → RESOLVED
+ *              ↓ (AI SUSPECTED 결론)
+ *           QUARANTINE  (책임자 재심사 대기)
  *
  * advr_payload(JSONB) 에는 리포트 본문, Phase 6 도입 시 citations[] 등이 격납된다.
  */
@@ -34,6 +36,11 @@ import java.time.OffsetDateTime;
 @Builder
 public class ReviewAdvisoryReport extends BaseEntity {
 
+    public static final String STATUS_OPEN       = "OPEN";
+    public static final String STATUS_VIEWED     = "VIEWED";
+    public static final String STATUS_ACKED      = "ACKED";
+    public static final String STATUS_RESOLVED   = "RESOLVED";
+    public static final String STATUS_QUARANTINE = "QUARANTINE";
     public static final String STATUS_OPEN     = "OPEN";
     public static final String STATUS_VIEWED   = "VIEWED";
     public static final String STATUS_ACKED    = "ACKED";
@@ -85,6 +92,9 @@ public class ReviewAdvisoryReport extends BaseEntity {
     @Column(name = "resolved_at")
     private OffsetDateTime resolvedAt;
 
+    @Column(name = "quarantined_at")
+    private OffsetDateTime quarantinedAt;
+
     public boolean isCritical() {
         return SEVERITY_CRITICAL.equals(severityCd);
     }
@@ -113,5 +123,10 @@ public class ReviewAdvisoryReport extends BaseEntity {
 
     public void updatePayload(String advrPayload) {
         this.advrPayload = advrPayload;
+    }
+
+    public void markQuarantined(OffsetDateTime at) {
+        this.advrStatusCd = STATUS_QUARANTINE;
+        this.quarantinedAt = at;
     }
 }
