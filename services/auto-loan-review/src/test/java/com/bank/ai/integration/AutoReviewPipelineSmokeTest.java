@@ -120,6 +120,21 @@ class AutoReviewPipelineSmokeTest {
     // ── 헬퍼 ──────────────────────────────────────────────────────────────
 
     /**
+     * DSR=0.55 > 0.40 → HardConstraintEvaluator DSR_EXCEEDED → Track 2 (하드 패일).
+     * 추론 결과와 무관하게 Track 2 강제.
+     */
+    private static AutoReviewRequest track2Request(Long revId) {
+        return new AutoReviewRequest(
+                revId,
+                null, 35, null, null, null, null, null, null, null, null, null, "regular",
+                null, null, null, null, null, null,
+                0.55, 0.50, null, null, 0, 750,   // dsr=0.55 초과 → DSR_EXCEEDED
+                "MORT_001", 200_000_000L, 360, "아파트 구입 자금 대출", null,
+                null, null, null, null, null, null, null
+        );
+    }
+
+    /**
      * Track 1 진입 조건을 충족하는 정상 신청 요청.
      * hard constraint 통과: dsr=0.30, ltv=0.50, credit=750, delinq=0, age=35.
      */
@@ -221,5 +236,33 @@ class AutoReviewPipelineSmokeTest {
                 .contains("MEDIUM");              // RiskLevelDeriver: Track 3 + decisionScore 0.65 ≥ 0.4 → MEDIUM
         // 시뮬레이션 2건 실행 확인 (초기 + 시뮬×2 = 총 3회)
         verify(autoReviewService, times(3)).review(any());
+    }
+
+    // ── TC 5: Track 2 — 준법 검토용 마킹 + 거절 통보문 초안 ──────────────
+
+    /**
+     * Track 2 E2E: DSR 초과 hard fail → TrackClassifier TRACK_2 →
+     * PreReviewAgentService.buildTrack2Opinion() →
+     * RejectionReasonAgentService(StubLlmClient) →
+     * DONE 콜백 (agentOpinionJson HIGH + COMPLIANCE_REVIEW_REQUIRED).
+     */
+    @Test
+    void Track2_준법검토_마킹_COMPLIANCE_REVIEW_REQUIRED_포함_DONE_콜백() {
+        restTemplate.postForEntity("/api/ai/auto-review/evaluate",
+                track2Request(20L), String.class);
+
+        var captor = ArgumentCaptor.forClass(ReviewReportUpdateRequest.class);
+        await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
+                verify(loanServiceClient).updateReport(eq(20L), captor.capture()));
+
+        ReviewReportUpdateRequest req = captor.getValue();
+        assertThat(req.status()).isEqualTo("DONE");
+        assertThat(req.report().track().name()).isEqualTo("TRACK_2");
+        assertThat(req.agentOpinionJson())
+                .isNotNull()
+                .contains("schema_version")
+                .contains("HIGH")                        // Track 2 → HIGH risk level
+                .contains("COMPLIANCE_REVIEW_REQUIRED"); // 준법 검토용 마킹
+        verify(autoReviewService, times(1)).review(any()); // 시뮬레이션 없음
     }
 }

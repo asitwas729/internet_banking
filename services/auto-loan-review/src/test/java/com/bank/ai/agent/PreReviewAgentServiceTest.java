@@ -1,6 +1,8 @@
 package com.bank.ai.agent;
 
 import com.bank.ai.agent.guard.SemanticDisagreementDetector;
+import com.bank.ai.agent.rejection.RejectionDraft;
+import com.bank.ai.agent.rejection.RejectionReasonAgentService;
 import com.bank.ai.llm.client.LlmCallException;
 import com.bank.ai.llm.client.LlmClient;
 import com.bank.ai.llm.client.LlmRequest;
@@ -48,6 +50,7 @@ class PreReviewAgentServiceTest {
     @Mock PurposeAnalysisService purposeAnalysisService;
     @Mock GroundingValidator groundingValidator;
     @Mock SemanticDisagreementDetector disagreementDetector;
+    @Mock RejectionReasonAgentService rejectionReasonAgentService;
 
     private AgentProperties enabledProps;
     private PreReviewAgentService service;
@@ -56,11 +59,15 @@ class PreReviewAgentServiceTest {
     void setUp() {
         enabledProps = new AgentProperties(true, 6, 2, true, 0);
         service = new PreReviewAgentService(enabledProps, rateMeter, llmClient,
-                reviewService, purposeAnalysisService, groundingValidator, disagreementDetector);
+                reviewService, purposeAnalysisService, groundingValidator, disagreementDetector,
+                rejectionReasonAgentService);
         // Track 3 정상 경로 기본 stub (Track1/2 에서는 미호출 — lenient)
         lenient().when(groundingValidator.validateNumericClaims(any(), any()))
                 .thenReturn(GroundingValidator.ValidationResult.ok());
         lenient().when(disagreementDetector.detect(any(), any())).thenReturn(false);
+        // Track 2 기본 stub (Track1/3 에서는 미호출 — lenient)
+        lenient().when(rejectionReasonAgentService.draft(any(), any(), any()))
+                .thenReturn(new RejectionDraft("반려 처리되었습니다.", List.of("DSR_EXCEEDED"), null));
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -90,12 +97,15 @@ class PreReviewAgentServiceTest {
     // ─────────────────────────────────────────────────────────────────────
 
     @Test
-    void Track2_HIGH_의견반환_LLM미호출() {
+    void Track2_HIGH_의견반환_COMPLIANCE_REVIEW_REQUIRED_마킹() {
         var result = service.run(1L, fullRequest(), track2Decision());
 
         assertThat(result.fallbackReason()).isNull();
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.HIGH);
         assertThat(result.simulationResults()).isEmpty();
+        assertThat(result.policyFlags()).contains("COMPLIANCE_REVIEW_REQUIRED");
+        assertThat(result.reasoningSummary()).isEqualTo("반려 처리되었습니다.");
+        verify(rejectionReasonAgentService).draft(eq(1L), any(), any());
         verify(llmClient, never()).call(any(), any());
     }
 
@@ -224,7 +234,7 @@ class PreReviewAgentServiceTest {
         var tightProps = new AgentProperties(true, 1, 2, true, 0);
         var tightService = new PreReviewAgentService(
                 tightProps, rateMeter, llmClient, reviewService, purposeAnalysisService,
-                groundingValidator, disagreementDetector);
+                groundingValidator, disagreementDetector, rejectionReasonAgentService);
 
         var result = tightService.run(1L, fullRequest(), track3Decision());
 
