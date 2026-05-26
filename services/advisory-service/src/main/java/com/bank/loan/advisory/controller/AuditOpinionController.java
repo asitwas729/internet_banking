@@ -57,6 +57,16 @@ public class AuditOpinionController {
         return ApiResponse.ok(queryService.riskScore(reviewerId));
     }
 
+    @Operation(summary = "최근 LLM 감사 의견 목록",
+            description = "생성 시각 최신순. limit 기본 20, 최대 100. auditor/admin 권한.")
+    @GetMapping("/opinions/recent")
+    public ApiResponse<List<AiAuditOpinionResponse>> recentOpinions(
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestHeader(value = "X-Actor-Role", required = false) String roleHeader) {
+        roleGuard.requireAuditorOrAdmin(roleHeader);
+        return ApiResponse.ok(queryService.recentOpinions(limit));
+    }
+
     @Operation(summary = "편향 위험도 상위 심사관 목록",
             description = "bias_score 내림차순. limit 기본 20, 최대 100. auditor/admin 권한.")
     @GetMapping("/risk-scores/top/bias")

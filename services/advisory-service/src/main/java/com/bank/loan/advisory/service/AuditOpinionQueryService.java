@@ -63,6 +63,13 @@ public class AuditOpinionQueryService {
     }
 
     @Transactional(readOnly = true)
+    public List<AiAuditOpinionResponse> recentOpinions(int limit) {
+        return opinionRepo.findAllByOrderByGeneratedAtDesc(PageRequest.of(0, clamp(limit))).stream()
+                .map(AiAuditOpinionResponse::from)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<QuarantineReportResponse> quarantinedReports() {
         return reportRepo.findAllQuarantined().stream()
                 .map(QuarantineReportResponse::of)
