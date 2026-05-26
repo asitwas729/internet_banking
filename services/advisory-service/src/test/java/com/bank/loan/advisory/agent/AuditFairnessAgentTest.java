@@ -5,6 +5,7 @@ import com.bank.loan.advisory.domain.ReviewAdvisorySignal;
 import com.bank.loan.advisory.domain.audit.AiAuditOpinion;
 import com.bank.loan.advisory.domain.audit.ReviewerRiskScore;
 import com.bank.loan.advisory.dto.PolicyCitationResponse;
+import com.bank.loan.advisory.event.QuarantineTriggeredEvent;
 import com.bank.loan.advisory.gateway.AiGatewayClient;
 import com.bank.loan.advisory.gateway.GatewayAnalysisRequest;
 import com.bank.loan.advisory.gateway.GatewayAnalysisResponse;
@@ -18,6 +19,7 @@ import com.bank.loan.review.repository.LoanReviewRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -32,25 +34,27 @@ import static org.mockito.Mockito.*;
 
 class AuditFairnessAgentTest {
 
-    ReviewAdvisoryReportRepository  reportRepo   = mock(ReviewAdvisoryReportRepository.class);
-    ReviewAdvisorySignalRepository  signalRepo   = mock(ReviewAdvisorySignalRepository.class);
-    LoanReviewRepository            reviewRepo   = mock(LoanReviewRepository.class);
-    AiGatewayClient                 gateway      = mock(AiGatewayClient.class);
-    PolicyCitationRetriever         citations    = mock(PolicyCitationRetriever.class);
-    AiAuditOpinionRepository        opinionRepo  = mock(AiAuditOpinionRepository.class);
-    ReviewerRiskScoreRepository     riskRepo     = mock(ReviewerRiskScoreRepository.class);
+    ReviewAdvisoryReportRepository  reportRepo     = mock(ReviewAdvisoryReportRepository.class);
+    ReviewAdvisorySignalRepository  signalRepo     = mock(ReviewAdvisorySignalRepository.class);
+    LoanReviewRepository            reviewRepo     = mock(LoanReviewRepository.class);
+    AiGatewayClient                 gateway        = mock(AiGatewayClient.class);
+    PolicyCitationRetriever         citations      = mock(PolicyCitationRetriever.class);
+    AiAuditOpinionRepository        opinionRepo    = mock(AiAuditOpinionRepository.class);
+    ReviewerRiskScoreRepository     riskRepo       = mock(ReviewerRiskScoreRepository.class);
+    ApplicationEventPublisher       eventPublisher = mock(ApplicationEventPublisher.class);
 
     AuditFairnessAgent agent;
 
     @BeforeEach
     void setUp() {
         agent = new AuditFairnessAgent(
-                reportRepo, signalRepo, reviewRepo, gateway, citations, opinionRepo, riskRepo);
+                reportRepo, signalRepo, reviewRepo, gateway, citations, opinionRepo, riskRepo, eventPublisher);
         when(citations.retrieve(anyLong(), any(), any(), any()))
                 .thenReturn(new PolicyCitationResponse(1L, 0, List.of()));
         when(riskRepo.findByReviewerId(anyLong())).thenReturn(Optional.empty());
         when(riskRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(opinionRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(reportRepo.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Test
@@ -112,8 +116,61 @@ class AuditFairnessAgentTest {
     }
 
     @Test
+    void BIAS_SUSPECTED_결론이면_리포트_격리_및_이벤트_발행() {
+        Long revId = 1005L;
+        Long reviewerId = 505L;
+        setupReportAndSignal(revId, reviewerId, AuditFairnessAgent.ADVISORY_TYPE_BIAS, "WARN");
+        setupLoanReview(revId, reviewerId, null);
+        when(gateway.analyze(any())).thenReturn(biasResponse("BIAS_SUSPECTED", 0.88));
+
+        agent.analyzeReports(List.of(5L));
+
+        verify(reportRepo).saveAll(any());
+
+        ArgumentCaptor<QuarantineTriggeredEvent> eventCaptor =
+                ArgumentCaptor.forClass(QuarantineTriggeredEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        QuarantineTriggeredEvent event = eventCaptor.getValue();
+        assertThat(event.revId()).isEqualTo(revId);
+        assertThat(event.conclusionCd()).isEqualTo("BIAS_SUSPECTED");
+        assertThat(event.analysisType()).isEqualTo("BIAS_DETECTION");
+    }
+
+    @Test
+    void NO_BIAS_결론이면_격리_없음() {
+        Long revId = 1006L;
+        Long reviewerId = 506L;
+        setupReportAndSignal(revId, reviewerId, AuditFairnessAgent.ADVISORY_TYPE_BIAS, "WARN");
+        setupLoanReview(revId, reviewerId, null);
+        when(gateway.analyze(any())).thenReturn(biasResponse("NO_BIAS_DETECTED", 0.91));
+
+        agent.analyzeReports(List.of(6L));
+
+        verify(reportRepo, never()).saveAll(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void VIOLATION_SUSPECTED_결론이면_격리_및_이벤트_발행() {
+        Long revId = 1007L;
+        Long reviewerId = 507L;
+        setupReportAndSignal(revId, reviewerId, "REREVIEW_RECOMMEND", "CRITICAL");
+        setupLoanReview(revId, reviewerId, null);
+        when(gateway.analyze(any())).thenReturn(complianceResponse("VIOLATION_SUSPECTED", 0.93));
+
+        agent.analyzeReports(List.of(7L));
+
+        ArgumentCaptor<QuarantineTriggeredEvent> eventCaptor =
+                ArgumentCaptor.forClass(QuarantineTriggeredEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().conclusionCd()).isEqualTo("VIOLATION_SUSPECTED");
+        assertThat(eventCaptor.getValue().analysisType()).isEqualTo("COMPLIANCE_VERIFICATION");
+    }
+
+    @Test
     void INFO_심각도_리포트는_분석_대상_아님() {
-        ReviewAdvisoryReport infoReport = mockReport(9L, 2001L, 601L, "INFO");
+        ReviewAdvisoryReport infoReport = mockReport(9L, 2001L, 601L, "INFO",
+                AuditFairnessAgent.ADVISORY_TYPE_BIAS);
         when(reportRepo.findAllById(List.of(9L))).thenReturn(List.of(infoReport));
 
         agent.analyzeReports(List.of(9L));
@@ -129,12 +186,12 @@ class AuditFairnessAgentTest {
 
     // ── helpers ──────────────────────────────────────────────────
 
-    private void setupReportAndSignal(Long revId, Long reviewerId, String ruleCd, String severity) {
+    private void setupReportAndSignal(Long revId, Long reviewerId, String advisoryTypeCd, String severity) {
         long advrId = Math.abs(revId % 1000) + 1;
-        ReviewAdvisoryReport report = mockReport(advrId, revId, reviewerId, severity);
+        ReviewAdvisoryReport report = mockReport(advrId, revId, reviewerId, severity, advisoryTypeCd);
         when(reportRepo.findAllById(any())).thenReturn(List.of(report));
         when(signalRepo.findByAdvrIdOrderByObservedAtAsc(advrId))
-                .thenReturn(List.of(mockSignal(advrId, ruleCd)));
+                .thenReturn(List.of(mockSignal(advrId)));
     }
 
     private void setupLoanReview(Long revId, Long reviewerId, String remark) {
@@ -150,17 +207,18 @@ class AuditFairnessAgentTest {
         when(reviewRepo.findById(revId)).thenReturn(Optional.of(review));
     }
 
-    private ReviewAdvisoryReport mockReport(Long advrId, Long revId, Long reviewerId, String severity) {
+    private ReviewAdvisoryReport mockReport(Long advrId, Long revId, Long reviewerId,
+                                            String severity, String advisoryTypeCd) {
         ReviewAdvisoryReport r = mock(ReviewAdvisoryReport.class);
         when(r.getAdvrId()).thenReturn(advrId);
         when(r.getRevId()).thenReturn(revId);
         when(r.getTargetReviewerId()).thenReturn(reviewerId);
         when(r.getSeverityCd()).thenReturn(severity);
-        when(r.getAdvisoryTypeCd()).thenReturn("BIAS");
+        when(r.getAdvisoryTypeCd()).thenReturn(advisoryTypeCd);
         return r;
     }
 
-    private ReviewAdvisorySignal mockSignal(Long advrId, String ruleCd) {
+    private ReviewAdvisorySignal mockSignal(Long advrId) {
         ReviewAdvisorySignal s = mock(ReviewAdvisorySignal.class);
         when(s.getAdvrId()).thenReturn(advrId);
         when(s.getSignalMetric()).thenReturn("approve_rate_bps");

@@ -1,9 +1,12 @@
 package com.bank.loan.advisory;
 
+import com.bank.loan.advisory.domain.ReviewAdvisoryReport;
 import com.bank.loan.advisory.domain.audit.AiAuditOpinion;
 import com.bank.loan.advisory.domain.audit.ReviewerRiskScore;
 import com.bank.loan.advisory.dto.AiAuditOpinionResponse;
+import com.bank.loan.advisory.dto.QuarantineReportResponse;
 import com.bank.loan.advisory.dto.ReviewerRiskScoreResponse;
+import com.bank.loan.advisory.repository.ReviewAdvisoryReportRepository;
 import com.bank.loan.advisory.repository.audit.AiAuditOpinionRepository;
 import com.bank.loan.advisory.repository.audit.ReviewerRiskScoreRepository;
 import com.bank.loan.advisory.service.AuditOpinionQueryService;
@@ -25,9 +28,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class AuditOpinionQueryIntegrationTest extends AbstractLoanIntegrationTest {
 
-    @Autowired AiAuditOpinionRepository  opinionRepo;
-    @Autowired ReviewerRiskScoreRepository riskRepo;
-    @Autowired AuditOpinionQueryService  queryService;
+    @Autowired AiAuditOpinionRepository       opinionRepo;
+    @Autowired ReviewerRiskScoreRepository    riskRepo;
+    @Autowired ReviewAdvisoryReportRepository reportRepo;
+    @Autowired AuditOpinionQueryService       queryService;
 
     @Test
     void advrId_로_감사_의견_조회() {
@@ -100,7 +104,40 @@ class AuditOpinionQueryIntegrationTest extends AbstractLoanIntegrationTest {
         }
     }
 
+    @Test
+    void quarantinedReports_격리_리포트_최신순_반환() {
+        OffsetDateTime now = OffsetDateTime.now();
+
+        ReviewAdvisoryReport older = quarantineReport(80_001L, 90_001L, now.minusHours(2));
+        ReviewAdvisoryReport newer = quarantineReport(80_002L, 90_002L, now.minusHours(1));
+        reportRepo.save(older);
+        reportRepo.save(newer);
+
+        List<QuarantineReportResponse> results = queryService.quarantinedReports();
+
+        List<Long> advrIds = results.stream().map(QuarantineReportResponse::advrId).toList();
+        // newer 가 먼저 (quarantined_at DESC)
+        int newerIdx = advrIds.indexOf(80_002L);
+        int olderIdx = advrIds.indexOf(80_001L);
+        assertThat(newerIdx).isLessThan(olderIdx);
+    }
+
     // ── helpers ──────────────────────────────────────────────────
+
+    private ReviewAdvisoryReport quarantineReport(Long revId, Long reviewerId, OffsetDateTime quarantinedAt) {
+        ReviewAdvisoryReport r = ReviewAdvisoryReport.builder()
+                .revId(revId)
+                .ruleId(1L)
+                .advisoryTypeCd("BIAS_DETECTION")
+                .severityCd(ReviewAdvisoryReport.SEVERITY_WARN)
+                .advrStatusCd(ReviewAdvisoryReport.STATUS_QUARANTINE)
+                .advrTitle("격리 테스트 리포트")
+                .targetReviewerId(reviewerId)
+                .generatedAt(quarantinedAt.minusMinutes(10))
+                .build();
+        r.markQuarantined(quarantinedAt);
+        return r;
+    }
 
     private AiAuditOpinion opinion(Long advrId, Long revId, Long reviewerId,
                                     String type, String conclusion, double confidence) {
