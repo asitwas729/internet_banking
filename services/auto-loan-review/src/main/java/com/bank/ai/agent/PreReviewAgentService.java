@@ -2,6 +2,7 @@ package com.bank.ai.agent;
 
 import com.bank.ai.agent.guard.AgentLoopGuard;
 import com.bank.ai.agent.guard.SemanticDisagreementDetector;
+import com.bank.ai.agent.rejection.RejectionReasonAgentService;
 import com.bank.ai.agent.tools.PolicyFlagTool;
 import com.bank.ai.agent.tools.PurposeAnalysisTool;
 import com.bank.ai.agent.tools.RecomputeWithTermsTool;
@@ -56,6 +57,7 @@ public class PreReviewAgentService {
     private final PurposeAnalysisService purposeAnalysisService;
     private final GroundingValidator groundingValidator;
     private final SemanticDisagreementDetector disagreementDetector;
+    private final RejectionReasonAgentService rejectionReasonAgentService;
 
     /**
      * @param revId    loan_review PK (멱등성 체크 및 로그용)
@@ -75,8 +77,8 @@ public class PreReviewAgentService {
         }
 
         if (decision.track() == Track.TRACK_2) {
-            log.debug("PreReviewAgentService: Track 2 (A8~A9 구현 예정) revId={}", revId);
-            return buildTrack2Opinion(request, decision);
+            log.debug("PreReviewAgentService: Track 2 트리거 revId={}", revId);
+            return buildTrack2Opinion(revId, request, decision);
         }
 
         return runTrack3(revId, request, decision);
@@ -294,14 +296,18 @@ public class PreReviewAgentService {
         );
     }
 
-    private AgentOpinion buildTrack2Opinion(AutoReviewRequest request, TrackDecision decision) {
-        List<String> flags = new PolicyFlagTool(request).evaluatePolicyFlags();
+    private AgentOpinion buildTrack2Opinion(Long revId, AutoReviewRequest request, TrackDecision decision) {
+        List<String> flags = new ArrayList<>(new PolicyFlagTool(request).evaluatePolicyFlags());
+        flags.add("COMPLIANCE_REVIEW_REQUIRED");  // 준법 검토용 마킹 (A9)
+
+        var draft = rejectionReasonAgentService.draft(revId, request, decision);
+
         return AgentOpinion.of(
                 decisionScoreOrZero(decision),
                 decision.pd(),
                 RiskLevelDeriver.derive(decision),
                 flags,
-                "정책 위반 또는 높은 PD로 인해 심사 기준을 충족하지 못했습니다.",
+                draft.notice(),
                 List.of(),
                 false
         );
