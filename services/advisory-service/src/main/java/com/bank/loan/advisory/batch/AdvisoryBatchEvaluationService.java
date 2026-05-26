@@ -1,5 +1,6 @@
 package com.bank.loan.advisory.batch;
 
+import com.bank.loan.advisory.agent.AuditFairnessAgent;
 import com.bank.loan.advisory.batch.ReviewerDecisionSnapshotService.SnapshotRunResult;
 import com.bank.loan.advisory.domain.ReviewAdvisoryReport;
 import com.bank.loan.advisory.engine.AdvisoryEvaluator;
@@ -26,6 +27,7 @@ public class AdvisoryBatchEvaluationService {
 
     private final ReviewerDecisionSnapshotService snapshotService;
     private final AdvisoryEvaluator evaluator;
+    private final AuditFairnessAgent auditFairnessAgent;
     private final ReviewAdvisoryReportRepository reportRepo;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -33,6 +35,8 @@ public class AdvisoryBatchEvaluationService {
     public BatchEvaluationResult runDailyBatch(String baseDate) {
         SnapshotRunResult snap = snapshotService.runDailySnapshot(baseDate);
         List<Long> advrIds = evaluator.evaluate(RuleContext.batch(baseDate));
+
+        auditFairnessAgent.analyzeReports(advrIds);
 
         for (Long advrId : advrIds) {
             reportRepo.findById(advrId).ifPresent(r ->
