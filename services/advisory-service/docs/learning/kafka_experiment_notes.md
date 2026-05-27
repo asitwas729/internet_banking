@@ -243,4 +243,73 @@ curl -X POST http://localhost:8081/compatibility/subjects/advisory.quarantine.tr
 
 ## L5 — Quota / Throttling
 
-*(미진행)*
+**구현 위치**
+- `AdvisoryKafkaQuotaManager` — AdminClient로 quota 설정·조회·해제
+- `InternalAdvisoryToolController` — POST/GET/DELETE `/api/internal/advisory/quota`
+
+**Quota 종류**
+
+| 키 | 단위 | 대상 |
+|---|---|---|
+| `producer_byte_rate` | bytes/s | 특정 client-id의 producer 전송률 상한 |
+| `consumer_byte_rate` | bytes/s | 특정 client-id의 consumer 수신률 상한 |
+| `request_percentage` | % (0~100) | 브로커 I/O·네트워크 스레드 점유 비율 상한 |
+
+**실험 1: producer throttle**
+
+설정:
+```bash
+# HTTP API로 설정 (애플리케이션 기동 중)
+curl -X POST "http://localhost:8083/api/internal/advisory/quota?clientId=advisory-producer&producerByteRate=1024"
+```
+또는 직접:
+```bash
+docker exec ib-kafka /opt/kafka/bin/kafka-configs.sh \
+  --bootstrap-server localhost:9092 \
+  --entity-type clients --entity-name advisory-producer \
+  --alter --add-config producer_byte_rate=1024
+```
+
+현재 quota 확인:
+```bash
+curl http://localhost:8083/api/internal/advisory/quota
+# 또는
+docker exec ib-kafka /opt/kafka/bin/kafka-configs.sh \
+  --bootstrap-server localhost:9092 --entity-type clients --describe
+```
+
+| client-id | producerByteRate(설정) | throttle-time-avg 관찰값(ms) | 실제 처리량(msg/s) |
+|---|---|---|---|
+| advisory-producer | 제한 없음 | | |
+| advisory-producer | 1024 B/s | | |
+| advisory-producer | 102400 B/s | | |
+
+**실험 2: consumer throttle**
+
+```bash
+curl -X POST "http://localhost:8083/api/internal/advisory/quota?clientId=advisory-quarantine-notifier&consumerByteRate=1024"
+```
+
+| client-id | consumerByteRate(설정) | consumer lag 변화 | fetch-rate 변화 |
+|---|---|---|---|
+| advisory-quarantine-notifier | 제한 없음 | | |
+| advisory-quarantine-notifier | 1024 B/s | | |
+
+**실험 3: request_percentage throttle**
+
+```bash
+curl -X POST "http://localhost:8083/api/internal/advisory/quota?clientId=advisory-producer&requestPercentage=1"
+```
+
+| requestPercentage | 브로커 응답 지연 증가 여부 | producer 에러 발생 여부 |
+|---|---|---|
+| 100 (무제한) | | |
+| 1 | | |
+
+**quota 해제**
+```bash
+curl -X DELETE "http://localhost:8083/api/internal/advisory/quota?clientId=advisory-producer"
+curl -X DELETE "http://localhost:8083/api/internal/advisory/quota?clientId=advisory-quarantine-notifier"
+```
+
+**학습 결론:**
