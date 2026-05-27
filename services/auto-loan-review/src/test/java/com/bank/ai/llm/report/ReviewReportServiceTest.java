@@ -83,7 +83,8 @@ class ReviewReportServiceTest {
                 hardFails,
                 "regular / professional / Q4 / 35-44",
                 "MORT_001",
-                null
+                null,
+                List.of()
         );
     }
 

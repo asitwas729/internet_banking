@@ -15,6 +15,7 @@ import com.bank.ai.review.client.LoanServiceClient;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.dto.AutoReviewResponse;
 import com.bank.ai.review.dto.ReviewReportUpdateRequest;
+import com.bank.ai.rag.retrieval.RagRetrievalService;
 import com.bank.ai.review.event.AutoReviewEvaluatedEvent;
 import com.bank.ai.rule.domain.Track;
 import com.bank.ai.rule.domain.TrackDecision;
@@ -53,6 +54,8 @@ class AutoReviewEventListenerTest {
     @Mock
     private PreReviewAgentService preReviewAgentService;
     @Mock
+    private RagRetrievalService ragRetrievalService;
+    @Mock
     private LoanServiceClient loanServiceClient;
     @Mock
     private AuditLogService auditLogService;
@@ -80,10 +83,12 @@ class AutoReviewEventListenerTest {
     void setUp() {
         listener = new AutoReviewEventListener(
                 purposeAnalysisService, reviewReportService, preReviewAgentService,
-                loanServiceClient, auditLogService,
+                ragRetrievalService, loanServiceClient, auditLogService,
                 new AuditLogProperties(true, false),
                 metricsRecorder,
                 objectMapper);
+        lenient().when(ragRetrievalService.retrieve(any(), any(), any()))
+                .thenReturn(List.of());
     }
 
     private AutoReviewEvaluatedEvent event(Long revId) {
