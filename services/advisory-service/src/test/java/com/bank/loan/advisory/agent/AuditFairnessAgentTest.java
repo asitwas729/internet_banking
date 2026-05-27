@@ -4,10 +4,12 @@ import com.bank.loan.advisory.domain.ReviewAdvisoryReport;
 import com.bank.loan.advisory.domain.ReviewAdvisorySignal;
 import com.bank.loan.advisory.domain.audit.AiAuditOpinion;
 import com.bank.loan.advisory.domain.audit.ReviewerRiskScore;
+import com.bank.loan.advisory.dto.PolicyCitationResponse;
 import com.bank.loan.advisory.event.QuarantineTriggeredEvent;
 import com.bank.loan.advisory.gateway.AiGatewayClient;
 import com.bank.loan.advisory.gateway.GatewayAnalysisRequest;
 import com.bank.loan.advisory.gateway.GatewayAnalysisResponse;
+import com.bank.loan.advisory.rag.PolicyCitationRetriever;
 import com.bank.loan.advisory.repository.ReviewAdvisoryReportRepository;
 import com.bank.loan.advisory.repository.ReviewAdvisorySignalRepository;
 import com.bank.loan.advisory.repository.audit.AiAuditOpinionRepository;
@@ -36,6 +38,7 @@ class AuditFairnessAgentTest {
     ReviewAdvisorySignalRepository  signalRepo     = mock(ReviewAdvisorySignalRepository.class);
     LoanReviewRepository            reviewRepo     = mock(LoanReviewRepository.class);
     AiGatewayClient                 gateway        = mock(AiGatewayClient.class);
+    PolicyCitationRetriever         citations      = mock(PolicyCitationRetriever.class);
     AiAuditOpinionRepository        opinionRepo    = mock(AiAuditOpinionRepository.class);
     ReviewerRiskScoreRepository     riskRepo       = mock(ReviewerRiskScoreRepository.class);
     ApplicationEventPublisher       eventPublisher = mock(ApplicationEventPublisher.class);
@@ -46,6 +49,9 @@ class AuditFairnessAgentTest {
     void setUp() {
         agent = new AuditFairnessAgent(
                 reportRepo, signalRepo, reviewRepo, gateway, opinionRepo, riskRepo, eventPublisher);
+                reportRepo, signalRepo, reviewRepo, gateway, citations, opinionRepo, riskRepo, eventPublisher);
+        when(citations.retrieve(anyLong(), any(), any(), any()))
+                .thenReturn(new PolicyCitationResponse(1L, 0, List.of()));
         when(riskRepo.findByReviewerId(anyLong())).thenReturn(Optional.empty());
         when(riskRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(opinionRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -187,6 +193,9 @@ class AuditFairnessAgentTest {
         ReviewAdvisorySignal signal = mockSignal(advrId);
         when(reportRepo.findAllById(any())).thenReturn(List.of(report));
         when(signalRepo.findByAdvrIdOrderByObservedAtAsc(advrId)).thenReturn(List.of(signal));
+        when(reportRepo.findAllById(any())).thenReturn(List.of(report));
+        when(signalRepo.findByAdvrIdOrderByObservedAtAsc(advrId))
+                .thenReturn(List.of(mockSignal(advrId)));
     }
 
     private void setupLoanReview(Long revId, Long reviewerId, String remark) {

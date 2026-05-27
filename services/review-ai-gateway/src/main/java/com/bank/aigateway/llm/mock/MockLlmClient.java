@@ -22,6 +22,8 @@ import org.springframework.stereotype.Component;
 public class MockLlmClient implements LlmClient, ToolAwareLlmClient {
 
     private final ObjectMapper objectMapper;
+@ConditionalOnProperty(name = "llm.provider", havingValue = "mock", matchIfMissing = true)
+public class MockLlmClient implements LlmClient {
 
     @Override
     public LlmResponse complete(LlmRequest request) {
