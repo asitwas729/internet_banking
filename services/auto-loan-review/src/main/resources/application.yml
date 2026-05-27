@@ -23,12 +23,54 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
 
+  batch:
+    job:
+      enabled: false        # 수동/스케줄 트리거, 기동 시 자동 실행 안 함
+    jdbc:
+      initialize-schema: always
+
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+spring:
+  ai:
+    vertex:
+      ai:
+        embedding:
+          options:
+            model: ${VERTEX_EMBEDDING_MODEL:text-embedding-005}
+        project-id: ${VERTEX_PROJECT_ID:}
+        location: ${VERTEX_LOCATION:us-central1}
+
 ai:
+  # ---- D1: RAG ----
+  rag:
+    enabled: ${AI_RAG_ENABLED:false}              # kill switch — false 시 인라인 policy fallback
+    embedding:
+      provider: ${AI_RAG_EMB_PROVIDER:stub}       # stub / vertex (D1-3 구현체 선택)
+      dimensions: 1024
+    search:
+      alpha: 0.7                                  # 벡터 가중치 (FTS = 1 - alpha)
+      similarity-threshold: 0.5                   # 이하 결과 제외
+      default-k: 5
+    call-caps-per-track:
+      TRACK_1: 1
+      TRACK_2: 2
+      TRACK_3: 5
+    rerank:
+      enabled: false                              # D-F2 옵션
+
+  # ---- B4: PSI Drift + Fairness ----
+  drift:
+    enabled: ${AI_DRIFT_ENABLED:true}
+    model-version: ${AI_MODEL_VERSION:v1}
+    psi-warning-threshold: 0.10
+    psi-critical-threshold: 0.20
+    fairness-gap-threshold: 0.05
+    bucket-count: 6
+
   # ---- B1: Audit Log ----
   audit:
     enabled: ${AI_AUDIT_ENABLED:true}
