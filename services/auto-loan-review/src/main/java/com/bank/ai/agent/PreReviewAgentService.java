@@ -6,6 +6,8 @@ import com.bank.ai.agent.rejection.RejectionReasonAgentService;
 import com.bank.ai.agent.tools.PolicyFlagTool;
 import com.bank.ai.agent.tools.PurposeAnalysisTool;
 import com.bank.ai.agent.tools.RecomputeWithTermsTool;
+import com.bank.ai.rag.retrieval.RagRetrievalService;
+import com.bank.ai.rag.search.Chunk;
 import com.bank.ai.llm.client.LlmCallException;
 import com.bank.ai.llm.client.LlmClient;
 import com.bank.ai.llm.client.LlmRequest;
@@ -58,6 +60,7 @@ public class PreReviewAgentService {
     private final GroundingValidator groundingValidator;
     private final SemanticDisagreementDetector disagreementDetector;
     private final RejectionReasonAgentService rejectionReasonAgentService;
+    private final RagRetrievalService ragRetrievalService;
 
     /**
      * @param revId    loan_review PK (멱등성 체크 및 로그용)
@@ -96,7 +99,13 @@ public class PreReviewAgentService {
             }
             List<String> policyFlags = new PolicyFlagTool(request).evaluatePolicyFlags();
 
-            // 2. 신청 사유 분석
+            // 2. RAG 정책 코퍼스 검색 (guard 슬롯 소비 — RagProperties.enabled=false 시 스킵)
+            String policyQuery = buildPolicyQuery(request);
+            List<Chunk> ragChunks = ragRetrievalService.retrieve(
+                    decision.track(), policyQuery, guard);
+            log.debug("PreReviewAgentService: RAG chunks={} revId={}", ragChunks.size(), revId);
+
+            // 3. 신청 사유 분석
             if (!guard.acquireTool()) {
                 return loopGuardFallback(revId);
             }
@@ -320,5 +329,11 @@ public class PreReviewAgentService {
 
     private static double decisionScoreOrZero(TrackDecision decision) {
         return decision.decisionScore() != null ? decision.decisionScore() : 0.0;
+    }
+
+    private static String buildPolicyQuery(AutoReviewRequest req) {
+        String product = req.productCode() != null ? req.productCode() : "";
+        String purpose = req.purposeCd() != null ? req.purposeCd() : "";
+        return (product + " " + purpose + " 정책 한도 기준").trim();
     }
 }
