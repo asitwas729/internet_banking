@@ -430,22 +430,61 @@ doc: "주담대 정상 직장인 PD 임계치는 자행 신용정책서 §3.2.1 
 
 ## 10. 단계별 마일스톤
 
-| Phase | 내용 | 상태 |
-|-------|------|------|
-| 0 | 공통 인프라 (ai-service, pgvector, PII, MLflow, ai-db) | 부분 완료 |
-| 1.1 | 합성 데이터 (4 Layer) | ✅ 완료 (검증 결함 3개 수정 필요) |
-| 1.2 | RuleEngine (Java, 정책 매트릭스 lookup 포함) | 예정 |
-| 1.3 | Feature Engineering + 임베딩 (bge-m3) | 예정 |
-| 1.4 | PD 모델 학습 (LightGBM) | 예정 |
-| 1.5 | LLM 보강 (신청 사유 분석) | ✅ 완료 |
-| 1.6 | LLM 리포트 생성기 (트랙별 톤) | ✅ 완료 |
-| 1.6.1 | Pre-Review Agent (Track 3 시뮬 + Track 2 거절 초안, A4~A9) | ✅ 완료 |
-| 1.7 | RAG 구축 (3 코퍼스) | ⏸ 보류 (rag-corpora.md 참조) |
-| 1.8 | `/evaluate` API 통합 + 트랙 분기 | ✅ 완료 |
-| 1.9 | 모니터링·Shadow 모드 | 예정 |
-| **자동심사 MVP 완성** | | 9~12주 |
-| 2 | 2nd Opinion Agent (별도 로드맵) | 후순위 |
-| 3 | 계약서 리스크 (별도 로드맵) | 후순위 |
+> 상세 실행 계획: [next-phase-roadmap.md](next-phase-roadmap.md) (인덱스)
+> Phase B 상세: [phase-b-operational.md](phase-b-operational.md)
+> Phase C 상세: [phase-c-ml-pipeline.md](phase-c-ml-pipeline.md)
+> Phase E 상세: [phase-e-frontend.md](phase-e-frontend.md)
+
+### 완료된 Phase
+
+| Phase | 내용 | 상태 | 상세 문서 |
+|-------|------|------|----------|
+| 0 | 공통 인프라 (ai-service, pgvector, PII, ai-db) | 부분 완료 | — |
+| 1.1 | 합성 데이터 4 Layer (HMDA + Home Credit 한국화) | ✅ 완료¹ | hmda-localization.md, pd-label-acquisition.md |
+| 1.5 | LLM 보강 — 신청 사유 plausibility 분석 | ✅ 완료 | llm-pipeline.md |
+| 1.6 | LLM 리포트 생성기 (트랙별 톤) | ✅ 완료 | llm-pipeline.md |
+| 1.6.1 | Pre-Review Agent (A4~A9) — Track 3 시뮬 + Track 2 거절 초안 | ✅ 완료 | pre-review-agent-plan.md |
+| 1.7 | RAG 구축 (3 코퍼스) | ⏸ 보류 | rag-corpora.md |
+| 1.8 | `/evaluate` API 통합 + RuleEngine 트랙 분기 | ✅ 완료 | pre-review-agent-plan.md |
+
+> ¹ Phase 1.1 검증 결함 3개(delinquency λ 과소, credit_score 단조성 위반, 편향 pool 버그) → Phase C1에서 수정 예정
+
+### 진행 예정 Phase
+
+| Phase | 내용 | 기간 | 상태 | 상세 문서 |
+|-------|------|------|------|----------|
+| **B** | **운영 준비** — Audit Log · Observability · Shadow Mode · PSI Drift · Admin | ~4주 | ⬜ 예정 | [phase-b-operational.md](phase-b-operational.md) |
+| B1 | Audit Log 영구 보존 (`ai_audit_log`, 5년 보존, 여신전문금융업법) | 1주 | ⬜ | 〃 §B1 |
+| B2 | Observability — 14종 Micrometer 메트릭 + Grafana 대시보드 | 0.5주 | ⬜ | 〃 §B2 |
+| B3 | Shadow Mode — `@Async` 분리 실행, 일치율 배치 집계 | 1주 | ⬜ | 〃 §B3 |
+| B4 | PSI Drift 감지 + 4/5ths Rule 공정성 리포트 | 0.5주 | ⬜ | 〃 §B4 |
+| B5 | Admin Endpoint — 재생성·kill-switch·상태조회 (RBAC) | 0.5주 | ⬜ | 〃 §B5 |
+| **C** | **ML 파이프라인 완성** — 합성 데이터 수정 · ONNX 학습 · SHAP · inference-server | ~6주 | ⬜ 예정 | [phase-c-ml-pipeline.md](phase-c-ml-pipeline.md) |
+| C1 | 합성 데이터 검증 결함 3개 수정 | 0.5주 | ⬜ | 〃 §C1 |
+| C2 | hmda_v1 Decision Score LightGBM 학습 + ONNX export | 1.5주 | ⬜ | 〃 §C2 |
+| C3 | homecredit_kr_v1 PD 모델 학습 + ONNX export + 캘리브레이션 | 1.5주 | ⬜ | 〃 §C3 |
+| C4 | inference-server FastAPI 리팩터링 (onnxruntime dual model) | 1주 | ⬜ | 〃 §C4 |
+| C5 | Java InferenceClient SHAP 필드 확장 | 0.5주 | ⬜ | 〃 §C5 |
+| C6 | FeatureMapper (AutoReviewRequest → feature vector) | 0.5주 | ⬜ | 〃 §C6 |
+| C7 | ML 회귀 검증 — Track 분포 · AUC/KS CI · 4/5ths Rule CI | 0.5주 | ⬜ | 〃 §C7 |
+| **D** | **RAG 구축** (보류 해제 시) — pgvector + bge-m3 + 3 코퍼스 | ~4주 | ⏸ 보류 | rag-corpora.md |
+| **E** | **심사원 대시보드** — React 18 + SSE + 트랙별 카드 + Admin 패널 | ~5주 | ⬜ 예정 | [phase-e-frontend.md](phase-e-frontend.md) |
+| E1 | 프로젝트 설정 (Vite + shadcn/ui + TanStack Query + Zustand) | 0.5주 | ⬜ | 〃 §E1 |
+| E2 | SSE 실시간 Push (SseEmitter + ReviewerSseRegistry) | 1주 | ⬜ | 〃 §E2 |
+| E3 | 심사 대기 목록 큐 보드 | 0.5주 | ⬜ | 〃 §E3 |
+| E4–E6 | Track 1/2/3 심사 카드 + SHAP 차트 + 시뮬레이션 카드 | 1.5주 | ⬜ | 〃 §E4~E6 |
+| E7 | 관리자 패널 (Shadow · PSI · 공정성 · RPD/RPM) | 1주 | ⬜ | 〃 §E7 |
+| E8 | 접근성 + 보안 (PII 이중 마스킹, RBAC) | 0.5주 | ⬜ | 〃 §E8 |
+| **F** | **Phase 2 에이전트** — 2nd Opinion + 계약서 리스크 | 별도 로드맵 | ⬜ 후순위 | next-phase-roadmap.md §F |
+
+### MVP 완성 기준
+
+```
+Phase B (완료) + Phase C (완료)
+  → 실제 ONNX 모델 서빙 + 운영 감사 로그 + Shadow Mode 배포
+  → 심사원에게 Shadow로 시범 노출, 일치율 ≥ 85% 4주 연속 달성
+  → Phase E 완료 후 Sign-off UI → 정식 운영
+```
 
 ---
 

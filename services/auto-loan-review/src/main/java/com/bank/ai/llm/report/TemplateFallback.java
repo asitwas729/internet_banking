@@ -1,6 +1,6 @@
 package com.bank.ai.llm.report;
 
-import com.bank.ai.llm.policy.PolicyIndex;
+import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.rule.domain.HardFailReason;
 import com.bank.ai.rule.domain.Track;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +24,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TemplateFallback {
 
-    private final PolicyIndex policyIndex;
+    private final InlinePolicyIndex policyIndex;
 
     public ReviewReport generate(ReviewReportInput input, String reason) {
         log.info("ReviewReport template fallback track={} reason={}", input.track(), reason);

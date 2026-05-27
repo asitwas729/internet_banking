@@ -4,7 +4,7 @@ import com.bank.ai.agent.tools.PolicyFlagTool;
 import com.bank.ai.agent.tools.PolicyLookupTool;
 import com.bank.ai.agent.tools.PurposeAnalysisTool;
 import com.bank.ai.agent.tools.RecomputeWithTermsTool;
-import com.bank.ai.llm.policy.PolicyIndex;
+import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.service.AutoReviewService;
@@ -32,7 +32,7 @@ public class AgentToolRegistry {
 
     private final AutoReviewService autoReviewService;
     private final PurposeAnalysisService purposeAnalysisService;
-    private final PolicyIndex policyIndex;
+    private final InlinePolicyIndex policyIndex;
 
     /**
      * 단일 에이전트 run 에 사용할 tool 인스턴스 목록을 반환한다.

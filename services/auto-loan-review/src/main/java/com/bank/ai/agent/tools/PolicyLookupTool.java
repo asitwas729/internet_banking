@@ -1,5 +1,6 @@
 package com.bank.ai.agent.tools;
 
+import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.policy.PolicyIndex;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.tool.annotation.Tool;
@@ -17,7 +18,7 @@ import org.springframework.ai.tool.annotation.Tool;
 @RequiredArgsConstructor
 public class PolicyLookupTool {
 
-    private final PolicyIndex policyIndex;
+    private final InlinePolicyIndex policyIndex;
 
     @Tool(description = """
             정책 ID로 내부 정책 텍스트와 출처를 조회합니다.

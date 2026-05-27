@@ -6,6 +6,9 @@ spring:
     name: auto-loan-review
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.model.vertexai.autoconfigure.embedding.VertexAiTextEmbeddingAutoConfiguration
 
   # ---- PostgreSQL (B1 Audit Log) ----
   datasource:
@@ -34,7 +37,6 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
-spring:
   ai:
     vertex:
       ai:
