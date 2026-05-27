@@ -1,0 +1,157 @@
+# Kafka 실험 노트
+
+> 각 Phase 실험 후 결과를 여기에 기록.
+
+---
+
+## L1 — 토픽 거버넌스
+
+**관찰 명령**
+```bash
+docker exec ib-kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe \
+  --topic advisory.quarantine.triggered.v1
+```
+
+| 항목 | 기대값 | 실측값 |
+|---|---|---|
+| partitions | 3 | |
+| replication-factor | 1 | |
+| retention.ms | 2592000000 (30일) | |
+
+**auto-create 꺼진 상태에서 토픽 없이 발행 시 오류 메시지:**
+```
+(여기에 붙여넣기)
+```
+
+**학습 결론:**
+
+---
+
+## L2 — Producer 고급 설정
+
+**실험 1: linger.ms=0 vs 20**
+
+| linger.ms | 처리량(msg/s) | 평균 지연(ms) | batch-size-avg |
+|---|---|---|---|
+| 0 | | | |
+| 20 | | | |
+
+**실험 2: compression.type 비교** (1000건 기준)
+
+| compression.type | payload 크기(bytes) | 압축률 | CPU 사용률 |
+|---|---|---|---|
+| none | | | |
+| lz4 | | | |
+| snappy | | | |
+| zstd | | | |
+
+**학습 결론:**
+
+---
+
+## L6 — Consumer 기본
+
+**실험 1: auto.offset.reset=earliest vs latest**
+
+| 설정 | 기존 메시지 수신 여부 | 첫 수신 offset |
+|---|---|---|
+| earliest | | |
+| latest | | |
+
+**실험 2: 수동 ack 전 재시작 시 offset 위치**
+- 재시작 전 처리한 마지막 offset:
+- 재시작 후 처음 수신한 offset:
+- 중복 처리된 메시지 수:
+
+**실험 3: DLQ 격리**
+- 강제 예외 발생 후 DLQ 토픽 메시지 확인:
+```bash
+docker exec ib-kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic advisory.quarantine.triggered.v1.dlq --from-beginning
+```
+결과:
+
+**학습 결론:**
+
+---
+
+## L7 — Consumer 성능/장애 튜닝
+
+**실험 1: fetch-min-bytes 조정**
+
+| fetch-min-bytes | fetch-max-wait-ms | 평균 지연(ms) | 처리량(msg/s) |
+|---|---|---|---|
+| 1 | 500 | | |
+| 10240 | 500 | | |
+
+**실험 2: max.poll.interval.ms 초과 → rebalance**
+- experiment-delay-ms 설정값:
+- max-poll-interval-ms 설정값:
+- rebalance 발생까지 걸린 시간:
+- 로그에서 확인한 rebalance 메시지:
+```
+(여기에 붙여넣기)
+```
+
+**실험 3: max-poll-records 조정**
+
+| max-poll-records | 처리 시간/배치(ms) | interval 초과 여부 |
+|---|---|---|
+| 500 | | |
+| 5000 | | |
+
+**학습 결론:**
+
+---
+
+## L4 — 커스텀 파티셔너
+
+**실험 1: 기본 파티셔너 (use-skew-aware-partitioner=false)**
+```bash
+docker exec ib-kafka /opt/kafka/bin/kafka-run-class.sh \
+  kafka.tools.GetOffsetShell \
+  --bootstrap-server localhost:9092 \
+  --topic advisory.test.skew.v1
+```
+
+| partition | 메시지 수 |
+|---|---|
+| 0 | |
+| 1 | |
+| 2 | |
+
+**실험 2: SkewAwarePartitioner (use-skew-aware-partitioner=true)**
+
+| partition | 메시지 수 |
+|---|---|
+| 0 | |
+| 1 | |
+| 2 | |
+
+**hot-key(reviewerId 1, 2, 100) 분포 비교:**
+- 기본 파티셔너: 쏠린 파티션 =
+- SkewAwarePartitioner: 분산 결과 =
+
+**순서 보장 손실 확인 여부 (hot-key 메시지가 여러 파티션에 분산됨):**
+
+**학습 결론:**
+
+---
+
+## L8 — Partition Assignment + Static Membership
+
+*(미진행)*
+
+---
+
+## L3 — Avro + Schema Registry
+
+*(미진행)*
+
+---
+
+## L5 — Quota / Throttling
+
+*(미진행)*
