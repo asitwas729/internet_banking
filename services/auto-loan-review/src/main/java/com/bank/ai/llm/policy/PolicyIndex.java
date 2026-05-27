@@ -1,5 +1,7 @@
 package com.bank.ai.llm.policy;
 
+import java.util.Optional;
+
 /**
  * 정책 인덱스 인터페이스 — phase-d-rag.md D2-1.
  *
@@ -12,8 +14,8 @@ public interface PolicyIndex {
     /** id 가 인덱스에 존재하는지 확인. */
     boolean exists(String id);
 
-    /** id 에 대응하는 정책 항목 반환 (없으면 null). */
-    PolicyEntry get(String id);
+    /** id 에 대응하는 정책 항목 반환. 없으면 {@link Optional#empty()}. */
+    Optional<PolicyEntry> get(String id);
 
     /**
      * @param text   심사원·LLM 노출용 정책 본문

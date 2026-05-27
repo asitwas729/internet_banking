@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
+
 /**
  * RAG 기반 정책 인덱스 — phase-d-rag.md D2-1.
  *
@@ -29,11 +31,10 @@ public class RagPolicyIndex implements PolicyIndex {
     }
 
     @Override
-    public PolicyEntry get(String sourceId) {
+    public Optional<PolicyEntry> get(String sourceId) {
         return ragSearchService.findBySourceId(CORPUS, sourceId)
                 .map(chunk -> new PolicyEntry(
                         chunk.promptText(),
-                        chunk.metadata().getOrDefault("source", "rag").toString()))
-                .orElse(null);
+                        chunk.metadata().getOrDefault("source", "rag").toString()));
     }
 }

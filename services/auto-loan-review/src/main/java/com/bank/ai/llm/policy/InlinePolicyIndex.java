@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Primary;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 인라인 정책 텍스트 인덱스 — application.yml {@code ai.policy.inline} 바인딩.
@@ -28,7 +29,7 @@ public record InlinePolicyIndex(Map<String, PolicyIndex.PolicyEntry> inline) imp
     }
 
     @Override
-    public PolicyIndex.PolicyEntry get(String id) {
-        return inline.get(id);
+    public Optional<PolicyIndex.PolicyEntry> get(String id) {
+        return Optional.ofNullable(inline.get(id));
     }
 }

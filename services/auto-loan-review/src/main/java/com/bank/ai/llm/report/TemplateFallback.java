@@ -134,10 +134,8 @@ public class TemplateFallback {
     private List<ReviewReport.Citation> citations(String... ids) {
         List<ReviewReport.Citation> out = new ArrayList<>();
         for (String id : ids) {
-            var entry = policyIndex.get(id);
-            if (entry != null) {
-                out.add(new ReviewReport.Citation(id, entry.source(), entry.text()));
-            }
+            policyIndex.get(id).ifPresent(entry ->
+                    out.add(new ReviewReport.Citation(id, entry.source(), entry.text())));
         }
         return out;
     }

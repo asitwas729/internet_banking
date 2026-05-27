@@ -1,7 +1,6 @@
 package com.bank.ai.agent.tools;
 
 import com.bank.ai.llm.policy.InlinePolicyIndex;
-import com.bank.ai.llm.policy.PolicyIndex;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.tool.annotation.Tool;
 
@@ -28,10 +27,8 @@ public class PolicyLookupTool {
             존재하지 않는 ID를 조회하면 오류 메시지를 반환합니다.
             """)
     public String lookupPolicy(String policyId) {
-        PolicyIndex.PolicyEntry entry = policyIndex.get(policyId);
-        if (entry == null) {
-            return "정책 ID를 찾을 수 없습니다: " + policyId;
-        }
-        return entry.text() + " [출처: " + entry.source() + "]";
+        return policyIndex.get(policyId)
+                .map(entry -> entry.text() + " [출처: " + entry.source() + "]")
+                .orElse("정책 ID를 찾을 수 없습니다: " + policyId);
     }
 }
