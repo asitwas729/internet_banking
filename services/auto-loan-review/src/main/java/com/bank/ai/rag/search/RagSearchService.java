@@ -1,0 +1,169 @@
+package com.bank.ai.rag.search;
+
+import com.bank.ai.rag.embedding.EmbeddingClient;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Service;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 하이브리드 검색 서비스 — 벡터 cosine + FTS BM25 가중합.
+ *
+ * <p>검색 SQL: rag-corpora.md §5.1 (CTE vec + fts → hybrid_score 내림차순).
+ * metaFilter 는 {@code metadata @> :filter::jsonb} JSONB containment 로 처리.
+ * similarity threshold 미만은 제외.
+ *
+ * <p>pgvector 전용 SQL 이라 H2 환경에서는 사용 불가.
+ * 단위 테스트는 {@link #existsById} 등 단순 조회만 사용,
+ * 하이브리드 검색 통합 테스트는 testcontainers + pgvector 로 별도 실행.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class RagSearchService {
+
+    private final JdbcClient jdbcClient;
+    private final EmbeddingClient embeddingClient;
+    private final RagSearchProperties props;
+
+    /**
+     * 하이브리드 검색.
+     *
+     * @param corpus      코퍼스 식별자
+     * @param query       자연어 질의
+     * @param metaFilter  JSONB containment 필터 (null 허용 — 필터 없음)
+     * @param k           반환 건수 (0 이하 시 defaultK 사용)
+     * @return 유사도 점수 내림차순 Chunk 목록
+     */
+    public List<Chunk> search(String corpus, String query,
+                              Map<String, Object> metaFilter, int k) {
+        int limit = k > 0 ? k : props.defaultK();
+        float[] queryVec = embeddingClient.embed(query);
+        String vecLiteral = toVectorLiteral(queryVec);
+        String metaJson = metaFilter != null && !metaFilter.isEmpty()
+                ? toJsonb(metaFilter) : null;
+
+        try {
+            return jdbcClient.sql(buildSql(metaJson != null))
+                    .param("corpus", corpus)
+                    .param("queryVec", vecLiteral)
+                    .param("queryTsq", toTsQuery(query))
+                    .param("alpha", props.alpha())
+                    .param("threshold", props.similarityThreshold())
+                    .param("k", limit)
+                    .paramSource(metaJson != null
+                            ? Map.of("metaFilter", metaJson)
+                            : Collections.emptyMap())
+                    .query(this::mapChunk)
+                    .list();
+        } catch (Exception e) {
+            log.error("RagSearchService: 검색 실패 corpus={} query={}", corpus, query, e);
+            return List.of();
+        }
+    }
+
+    /** chunk id 존재 여부 — GroundingValidator 에서 citation 검증 시 사용. */
+    public boolean existsById(long id) {
+        return Boolean.TRUE.equals(
+                jdbcClient.sql("SELECT EXISTS(SELECT 1 FROM ai_embedding WHERE id = :id AND is_active)")
+                        .param("id", id)
+                        .query(Boolean.class)
+                        .single());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+
+    private static String buildSql(boolean withMetaFilter) {
+        String metaCond = withMetaFilter
+                ? "AND metadata @> :metaFilter::jsonb" : "";
+
+        return """
+                WITH vec AS (
+                    SELECT id, source_id, chunk_text, chunk_summary, metadata,
+                           1 - (embedding <=> CAST(:queryVec AS vector)) AS vec_score
+                    FROM ai_embedding
+                    WHERE corpus = :corpus
+                      AND is_active
+                      %s
+                    ORDER BY embedding <=> CAST(:queryVec AS vector)
+                    LIMIT 50
+                ),
+                fts AS (
+                    SELECT id,
+                           ts_rank_cd(fts_tokens, to_tsquery('simple', :queryTsq)) AS fts_score
+                    FROM ai_embedding
+                    WHERE corpus = :corpus
+                      AND is_active
+                      AND fts_tokens @@ to_tsquery('simple', :queryTsq)
+                    LIMIT 50
+                )
+                SELECT v.id, v.source_id, v.chunk_text, v.chunk_summary, v.metadata::text,
+                       (:alpha * v.vec_score + (1 - :alpha) * COALESCE(f.fts_score, 0)) AS hybrid_score
+                FROM vec v
+                LEFT JOIN fts f USING (id)
+                WHERE (:alpha * v.vec_score + (1 - :alpha) * COALESCE(f.fts_score, 0)) >= :threshold
+                ORDER BY hybrid_score DESC
+                LIMIT :k
+                """.formatted(metaCond);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Chunk mapChunk(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
+        long id = rs.getLong("id");
+        String sourceId = rs.getString("source_id");
+        String text = rs.getString("chunk_text");
+        String summary = rs.getString("chunk_summary");
+        String metaJson = rs.getString("metadata");
+        double score = rs.getDouble("hybrid_score");
+
+        Map<String, Object> metadata = parseJsonb(metaJson);
+        return new Chunk(id, null, sourceId, text, summary, metadata, score);
+    }
+
+    private static String toVectorLiteral(float[] vec) {
+        var sb = new StringBuilder("[");
+        for (int i = 0; i < vec.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(vec[i]);
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    private static String toTsQuery(String query) {
+        // 공백 → & 연산자 (simple FTS)
+        return query.trim().replaceAll("\\s+", " & ").replaceAll("[^가-힣a-zA-Z0-9&_ ]", "");
+    }
+
+    private static String toJsonb(Map<String, Object> filter) {
+        // 단순 JSON 직렬화 (Jackson 미사용 — 의존 최소화)
+        var sb = new StringBuilder("{");
+        boolean first = true;
+        for (var entry : filter.entrySet()) {
+            if (!first) sb.append(',');
+            sb.append('"').append(entry.getKey()).append("\":");
+            Object v = entry.getValue();
+            if (v instanceof String s) sb.append('"').append(s).append('"');
+            else sb.append(v);
+            first = false;
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> parseJsonb(String json) {
+        if (json == null || json.isBlank() || "{}".equals(json.trim())) return Map.of();
+        // Jackson 이 classpath 에 있으므로 간단히 ObjectMapper 사용
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, HashMap.class);
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+}
