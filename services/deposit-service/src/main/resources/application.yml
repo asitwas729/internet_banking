@@ -1,6 +1,3 @@
-아래 내용으로 전체 교체하면 됩니다.
-
-```yaml
 server:
   port: ${DEPOSIT_APP_PORT:8082}
   servlet:
@@ -34,6 +31,11 @@ spring:
     baseline-on-migrate: false
     out-of-order: false   # V3·V4 갭 명시적 차단 — 순서 역전 마이그레이션 방지
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
 management:
   endpoints:
     web:
@@ -66,5 +68,5 @@ springdoc:
 logging:
   level:
     root: INFO
+    com.bank.deposit: DEBUG
     org.springframework.web: INFO
-```
