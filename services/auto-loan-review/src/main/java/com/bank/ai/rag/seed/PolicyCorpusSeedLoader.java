@@ -6,6 +6,8 @@ import com.bank.ai.rag.embedding.EmbeddingClient;
 import com.bank.ai.rule.config.RuleEngineProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,6 +16,8 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * 정책 코퍼스 P1 seed — 기동 시 1회 실행 (멱등).
@@ -43,9 +47,27 @@ public class PolicyCorpusSeedLoader implements ApplicationRunner {
     private final InlinePolicyIndex policyIndex;
     private final RuleEngineProperties ruleEngineProps;
 
+    /** Embedding API 호출 비동기 위임 — readiness probe 미통과 방지. */
+    @Autowired
+    @Qualifier("llmExecutor")
+    private Executor executor;
+
+    /**
+     * 기동 즉시 반환 — 실제 seed 작업은 llmExecutor 에 위임.
+     * ON CONFLICT DO NOTHING 으로 멱등하므로 재기동 시 재적재 없음.
+     */
     @Override
     public void run(ApplicationArguments args) {
-        log.info("PolicyCorpusSeedLoader: 정책 코퍼스 P1 seed 시작");
+        log.info("PolicyCorpusSeedLoader: 정책 코퍼스 P1 seed 비동기 시작");
+        CompletableFuture.runAsync(this::doSeed, executor)
+                .exceptionally(e -> {
+                    log.error("PolicyCorpusSeedLoader: seed 실패", e);
+                    return null;
+                });
+    }
+
+    private void doSeed() {
+        log.info("PolicyCorpusSeedLoader: seed 작업 시작");
         int inserted = 0;
         inserted += seedInlinePolicies();
         inserted += seedMatrixCells();
