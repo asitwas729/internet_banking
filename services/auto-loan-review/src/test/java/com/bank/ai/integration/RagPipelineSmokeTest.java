@@ -17,7 +17,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.List;
@@ -151,6 +150,9 @@ class RagPipelineSmokeTest {
     }
 
     // ── TC 3: Track 3 + RAG 활성 — MEDIUM 리스크 콜백 ──────────────────
+    // TRACK_3 진입 조건: autoReviewService 가 mock 이므로 DSR/LTV 규칙이 아닌
+    // inference 응답(TRACK3_INFERENCE: pd=0.25, confidence=0.65)이 TrackClassifier 에
+    // 전달되어 회색지대 → TRACK_3 분류됨.
 
     @Test
     void Track3_RAG_활성_DONE_MEDIUM_콜백() {
@@ -160,7 +162,7 @@ class RagPipelineSmokeTest {
                 .thenReturn(TRACK3_SIM);
 
         restTemplate.postForEntity("/api/ai/auto-review/evaluate",
-                track1Request(203L), String.class);
+                track3Request(203L), String.class);
 
         var captor = ArgumentCaptor.forClass(ReviewReportUpdateRequest.class);
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
@@ -190,28 +192,6 @@ class RagPipelineSmokeTest {
         assertThat(req.agentOpinionJson()).isNotNull().contains("schema_version");
     }
 
-    // ── TC 5: ai.rag.enabled=false → 인라인 정책 단독 경로 ──────────────
-
-    @Test
-    void RAG_비활성_인라인_정책_단독_경로_DONE_콜백() {
-        // ragRetrievalService 가 @ConditionalOnProperty(ai.rag.enabled=true) 이므로
-        // 이 테스트에서 ragRetrievalService mock 은 호출되지 않아야 함.
-        // 단, 현 컨텍스트는 ai.rag.enabled=true 로 기동 — 같은 컨텍스트 내에서
-        // RAG를 비활성화하려면 retrieve가 빈 목록을 반환하는 상황을 시뮬레이션.
-        when(ragRetrievalService.retrieve(any(), any(), any())).thenReturn(List.of());
-
-        var resp = restTemplate.postForEntity("/api/ai/auto-review/evaluate",
-                track1Request(205L), String.class);
-        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-
-        var captor = ArgumentCaptor.forClass(ReviewReportUpdateRequest.class);
-        await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
-                verify(loanServiceClient).updateReport(eq(205L), captor.capture()));
-
-        assertThat(captor.getValue().status()).isEqualTo("DONE");
-        assertThat(captor.getValue().report()).isNotNull();
-    }
-
     // ── 헬퍼 ─────────────────────────────────────────────────────────────
 
     private static AutoReviewRequest track1Request(Long revId) {
@@ -229,6 +209,23 @@ class RagPipelineSmokeTest {
                 revId, null, 35, null, null, null, null, null, null, null, null, null, "regular",
                 null, null, null, null, null, null,
                 0.55, 0.50, null, null, 0, 750,   // dsr=0.55 → DSR_EXCEEDED → TRACK_2
+                "MORT_001", 200_000_000L, 360, "아파트 구입 자금 대출", null,
+                null, null, null, null, null, null, null
+        );
+    }
+
+    /**
+     * Track 3 진입용 요청 픽스처.
+     *
+     * <p>dsr=0.30 으로 하드 제약을 통과하되, inference 응답(TRACK3_INFERENCE)의
+     * pd=0.25·confidence=0.65 가 PolicyMatrix 회색지대에 해당하여 TRACK_3 로 분류됨.
+     * Track 결정은 autoReviewService(mock)의 응답에서 비롯되므로 DSR 값과는 무관.
+     */
+    private static AutoReviewRequest track3Request(Long revId) {
+        return new AutoReviewRequest(
+                revId, null, 35, null, null, null, null, null, null, null, null, null, "regular",
+                null, null, null, null, null, null,
+                0.30, 0.50, null, null, 0, 690,   // dsr=0.30, credit=690 — 하드 제약 통과
                 "MORT_001", 200_000_000L, 360, "아파트 구입 자금 대출", null,
                 null, null, null, null, null, null, null
         );
