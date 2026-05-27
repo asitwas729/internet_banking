@@ -12,6 +12,8 @@ import com.bank.ai.llm.purpose.PurposeAnalysisService;
 import com.bank.ai.llm.report.ReviewReport;
 import com.bank.ai.llm.report.ReviewReportInput;
 import com.bank.ai.llm.report.ReviewReportService;
+import com.bank.ai.rag.retrieval.RagRetrievalService;
+import com.bank.ai.rag.search.Chunk;
 import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.metrics.AgentOutcome;
 import com.bank.ai.shadow.ShadowModeService;
@@ -30,6 +32,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
@@ -58,6 +61,7 @@ public class AutoReviewEventListener {
     private final PurposeAnalysisService purposeAnalysisService;
     private final ReviewReportService reviewReportService;
     private final PreReviewAgentService preReviewAgentService;
+    private final RagRetrievalService ragRetrievalService;
     private final LoanServiceClient loanServiceClient;
     private final AuditLogService auditLogService;
     private final AuditLogProperties auditLogProperties;
@@ -189,6 +193,10 @@ public class AutoReviewEventListener {
     }
 
     private ReviewReport generateReport(AutoReviewEvaluatedEvent event, PurposeAnalysis purpose) {
+        String query = buildPolicyQuery(event);
+        List<Chunk> ragChunks = ragRetrievalService.retrieve(
+                event.decision().track(), query, null);
+
         var input = new ReviewReportInput(
                 event.decision().track(),
                 event.inference().pdScore() != null ? event.inference().pdScore() : 0.0,
@@ -198,8 +206,15 @@ public class AutoReviewEventListener {
                 event.decision().hardFails(),
                 "persona_summary_stub",
                 event.request().productCode(),
-                purpose
+                purpose,
+                ragChunks
         );
         return reviewReportService.generate(input);
+    }
+
+    private static String buildPolicyQuery(AutoReviewEvaluatedEvent event) {
+        String product = event.request().productCode() != null ? event.request().productCode() : "";
+        String purpose = event.request().purposeCd() != null ? event.request().purposeCd() : "";
+        return (product + " " + purpose + " 정책 한도 기준").trim();
     }
 }

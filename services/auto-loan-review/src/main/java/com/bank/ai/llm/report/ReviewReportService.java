@@ -3,6 +3,7 @@ package com.bank.ai.llm.report;
 import com.bank.ai.llm.client.LlmCallException;
 import com.bank.ai.llm.client.LlmClient;
 import com.bank.ai.llm.client.LlmRequest;
+import com.bank.ai.rag.search.Chunk;
 import com.bank.ai.llm.config.LlmProperties;
 import com.bank.ai.llm.prompt.PromptRegistry;
 import com.bank.ai.llm.support.LlmCostExceededException;
@@ -11,6 +12,8 @@ import com.bank.ai.rule.domain.Track;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 /**
  * 트랙별 심사 리포트 생성 — plan/llm-pipeline.md §5 (P3).
@@ -118,6 +121,7 @@ public class ReviewReportService {
         var decisionLine = in.decisionScore() != null
                 ? "decisionScore: %.4f".formatted(in.decisionScore())
                 : "decisionScore: (PD-only 폴백)";
+        var ragLine = buildRagChunksSection(in.ragContext());
 
         return """
                 <user_content>
@@ -125,6 +129,7 @@ public class ReviewReportService {
                   personaSummary: %s
                   productCode: %s
                   pdScore: %.4f (threshold %.4f, safetyTau %.4f)
+                  %s
                   %s
                   %s
                   %s
@@ -136,7 +141,18 @@ public class ReviewReportService {
                 in.pdScore(), in.pdThreshold(), in.safetyMarginThreshold(),
                 decisionLine,
                 hardFailLine,
-                purposeLine
+                purposeLine,
+                ragLine
         );
+    }
+
+    private static String buildRagChunksSection(List<Chunk> chunks) {
+        if (chunks.isEmpty()) return "rag_policy_context: (없음)";
+        var sb = new StringBuilder("rag_policy_context:\n");
+        for (int i = 0; i < chunks.size(); i++) {
+            var c = chunks.get(i);
+            sb.append("  [%d] id=%s — %s%n".formatted(i + 1, c.sourceId(), c.promptText()));
+        }
+        return sb.toString().stripTrailing();
     }
 }

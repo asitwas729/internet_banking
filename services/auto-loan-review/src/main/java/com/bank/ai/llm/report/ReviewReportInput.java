@@ -1,13 +1,14 @@
 package com.bank.ai.llm.report;
 
 import com.bank.ai.llm.purpose.PurposeAnalysis;
+import com.bank.ai.rag.search.Chunk;
 import com.bank.ai.rule.domain.HardFailReason;
 import com.bank.ai.rule.domain.Track;
 
 import java.util.List;
 
 /**
- * ReviewReportService 입력 — RuleEngine·PD/decision 추론·PurposeAnalysis 종합.
+ * ReviewReportService 입력 — RuleEngine·PD/decision 추론·PurposeAnalysis·RAG 컨텍스트 종합.
  *
  * <p>personaSummary 는 segment + occupation + income_quintile + age_band 등 derived 만.
  * Raw PII 는 호출 측에서 절대 포함 X (PII 마스킹 적용 후 호출).
@@ -21,6 +22,7 @@ import java.util.List;
  * @param personaSummary      "regular / 전문가 / Q4 / 35-44" 류 derived only
  * @param productCode         상품
  * @param purposeAnalysis     §4 PurposeAnalysis 결과 (null 가능 — LLM 미가용 fallback 시)
+ * @param ragContext          RAG 정책 코퍼스 청크 (D2-4). 빈 리스트면 주입 없음.
  */
 public record ReviewReportInput(
         Track track,
@@ -31,6 +33,10 @@ public record ReviewReportInput(
         List<HardFailReason> hardFails,
         String personaSummary,
         String productCode,
-        PurposeAnalysis purposeAnalysis
+        PurposeAnalysis purposeAnalysis,
+        List<Chunk> ragContext
 ) {
+    public ReviewReportInput {
+        ragContext = ragContext != null ? List.copyOf(ragContext) : List.of();
+    }
 }
