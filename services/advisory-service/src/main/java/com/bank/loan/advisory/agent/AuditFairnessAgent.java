@@ -4,15 +4,12 @@ import com.bank.loan.advisory.domain.ReviewAdvisoryReport;
 import com.bank.loan.advisory.domain.ReviewAdvisorySignal;
 import com.bank.loan.advisory.domain.audit.AiAuditOpinion;
 import com.bank.loan.advisory.domain.audit.ReviewerRiskScore;
-import com.bank.loan.advisory.dto.PolicyCitationResponse;
 import com.bank.loan.advisory.event.QuarantineTriggeredEvent;
 import com.bank.loan.advisory.gateway.AiGatewayClient;
 import com.bank.loan.advisory.gateway.GatewayAnalysisRequest;
-import com.bank.loan.advisory.gateway.GatewayAnalysisRequest.GatewayRagChunk;
 import com.bank.loan.advisory.gateway.GatewayAnalysisRequest.GatewaySignalSummary;
 import com.bank.loan.advisory.gateway.GatewayAnalysisResponse;
 import com.bank.loan.advisory.rag.PiiMaskingUtil;
-import com.bank.loan.advisory.rag.PolicyCitationRetriever;
 import com.bank.loan.advisory.repository.ReviewAdvisoryReportRepository;
 import com.bank.loan.advisory.repository.ReviewAdvisorySignalRepository;
 import com.bank.loan.advisory.repository.audit.AiAuditOpinionRepository;
@@ -30,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
 
 /**
  * 감사/공정성 Agent. 룰 엔진이 WARN 이상 리포트를 발행한 뒤 호출.
@@ -54,7 +52,6 @@ public class AuditFairnessAgent {
     private final ReviewAdvisorySignalRepository  signalRepo;
     private final LoanReviewRepository            loanReviewRepo;
     private final AiGatewayClient                 gatewayClient;
-    private final PolicyCitationRetriever         citationRetriever;
     private final AiAuditOpinionRepository        opinionRepo;
     private final ReviewerRiskScoreRepository     riskScoreRepo;
     private final ApplicationEventPublisher       eventPublisher;
@@ -94,16 +91,12 @@ public class AuditFairnessAgent {
 
         if (!biasReports.isEmpty()) {
             List<GatewaySignalSummary> signals = loadSignals(biasReports);
-            Long advrId = biasReports.get(0).getAdvrId();
-            List<GatewayRagChunk> chunks = fetchRagChunks(advrId, AiAuditOpinion.TYPE_BIAS, signals);
-            callAndSave(revId, reviewerId, biasReports, AiAuditOpinion.TYPE_BIAS, signals, maskedOpinion, chunks);
+            callAndSave(revId, reviewerId, biasReports, AiAuditOpinion.TYPE_BIAS, signals, maskedOpinion);
         }
 
         if (!complianceReports.isEmpty()) {
             List<GatewaySignalSummary> signals = loadSignals(complianceReports);
-            Long advrId = complianceReports.get(0).getAdvrId();
-            List<GatewayRagChunk> chunks = fetchRagChunks(advrId, AiAuditOpinion.TYPE_COMPLIANCE, signals);
-            callAndSave(revId, reviewerId, complianceReports, AiAuditOpinion.TYPE_COMPLIANCE, signals, maskedOpinion, chunks);
+            callAndSave(revId, reviewerId, complianceReports, AiAuditOpinion.TYPE_COMPLIANCE, signals, maskedOpinion);
         }
     }
 
@@ -111,12 +104,11 @@ public class AuditFairnessAgent {
                              List<ReviewAdvisoryReport> groupReports,
                              String analysisType,
                              List<GatewaySignalSummary> signals,
-                             String maskedOpinion,
-                             List<GatewayRagChunk> ragChunks) {
+                             String maskedOpinion) {
         Long advrId = groupReports.get(0).getAdvrId();
         try {
             GatewayAnalysisResponse resp = gatewayClient.analyze(new GatewayAnalysisRequest(
-                    analysisType, revId, reviewerId, maskedOpinion, signals, ragChunks));
+                    analysisType, revId, reviewerId, maskedOpinion, signals));
 
             opinionRepo.save(AiAuditOpinion.builder()
                     .advrId(advrId)
@@ -198,19 +190,4 @@ public class AuditFairnessAgent {
         return result;
     }
 
-    private List<GatewayRagChunk> fetchRagChunks(Long advrId, String type,
-                                                   List<GatewaySignalSummary> signals) {
-        try {
-            String query = signals.stream()
-                    .map(GatewaySignalSummary::signalMetric)
-                    .collect(Collectors.joining(" "));
-            PolicyCitationResponse citation = citationRetriever.retrieve(advrId, type, query, null);
-            return citation.citations().stream()
-                    .map(c -> new GatewayRagChunk(c.docTitle() + " > " + c.sectionPath(), c.chunkText()))
-                    .toList();
-        } catch (Exception e) {
-            log.debug("RAG 청크 조회 실패 — advrId={}: {}", advrId, e.getMessage());
-            return List.of();
-        }
-    }
 }

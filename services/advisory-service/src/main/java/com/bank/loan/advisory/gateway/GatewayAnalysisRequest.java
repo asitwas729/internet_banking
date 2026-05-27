@@ -7,8 +7,7 @@ public record GatewayAnalysisRequest(
         Long revId,
         Long reviewerId,
         String reviewOpinionText,
-        List<GatewaySignalSummary> signals,
-        List<GatewayRagChunk> ragChunks
+        List<GatewaySignalSummary> signals
 ) {
     public record GatewaySignalSummary(
             String ruleCd,
@@ -16,10 +15,5 @@ public record GatewayAnalysisRequest(
             String signalMetric,
             double observedValue,
             double thresholdValue
-    ) {}
-
-    public record GatewayRagChunk(
-            String source,
-            String content
     ) {}
 }
