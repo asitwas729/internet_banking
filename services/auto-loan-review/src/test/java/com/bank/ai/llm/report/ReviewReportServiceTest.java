@@ -5,6 +5,7 @@ import com.bank.ai.llm.client.LlmClient;
 import com.bank.ai.llm.client.LlmRequest;
 import com.bank.ai.llm.client.StubLlmClient;
 import com.bank.ai.llm.config.LlmProperties;
+import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.policy.PolicyIndex;
 import com.bank.ai.llm.prompt.PromptRegistry;
 import com.bank.ai.llm.support.LlmCostMeter;
@@ -36,7 +37,7 @@ class ReviewReportServiceTest {
     );
 
     /** 인라인 정책 — 모든 stub citation id 와 hard fail 매핑 포함. */
-    private static final PolicyIndex POLICY = new PolicyIndex(Map.ofEntries(
+    private static final InlinePolicyIndex POLICY = new InlinePolicyIndex(Map.ofEntries(
             Map.entry("PD_THRESHOLD_MATRIX_V1",
                     new PolicyIndex.PolicyEntry("PD 매트릭스", "internal_policy_2026q2")),
             Map.entry("AUTO_REVIEW_GOVERNANCE_V1",

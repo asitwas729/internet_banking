@@ -1,5 +1,6 @@
 package com.bank.ai.llm.report;
 
+import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.policy.PolicyIndex;
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +12,7 @@ class PolicyIndexTest {
 
     @Test
     void exists는_매핑_된_id에만_true() {
-        var idx = new PolicyIndex(Map.of(
+        var idx = new InlinePolicyIndex(Map.of(
                 "A_V1", new PolicyIndex.PolicyEntry("정책 A", "src-1"),
                 "B_V1", new PolicyIndex.PolicyEntry("정책 B", "src-2")
         ));
@@ -23,7 +24,7 @@ class PolicyIndexTest {
 
     @Test
     void null_inline_빈_map으로_초기화() {
-        var idx = new PolicyIndex(null);
+        var idx = new InlinePolicyIndex(null);
 
         assertThat(idx.exists("anything")).isFalse();
         assertThat(idx.inline()).isEmpty();
@@ -31,7 +32,7 @@ class PolicyIndexTest {
 
     @Test
     void get은_PolicyEntry_반환() {
-        var idx = new PolicyIndex(Map.of(
+        var idx = new InlinePolicyIndex(Map.of(
                 "A_V1", new PolicyIndex.PolicyEntry("정책 A", "src-1")
         ));
 

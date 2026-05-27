@@ -4,6 +4,7 @@ import com.bank.ai.agent.AgentOpinion;
 import com.bank.ai.agent.FallbackReason;
 import com.bank.ai.agent.RiskLevel;
 import com.bank.ai.agent.SimulationResult;
+import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.policy.PolicyIndex;
 import com.bank.ai.rule.domain.Track;
 import com.bank.ai.rule.domain.TrackDecision;
@@ -16,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class GroundingValidatorTest {
 
-    private static final PolicyIndex POLICY = new PolicyIndex(Map.of(
+    private static final InlinePolicyIndex POLICY = new InlinePolicyIndex(Map.of(
             "A_V1", new PolicyIndex.PolicyEntry("정책 A", "src"),
             "B_V1", new PolicyIndex.PolicyEntry("정책 B", "src"),
             "C_V1", new PolicyIndex.PolicyEntry("정책 C", "src")

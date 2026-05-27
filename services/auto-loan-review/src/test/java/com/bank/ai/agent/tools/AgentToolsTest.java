@@ -1,5 +1,6 @@
 package com.bank.ai.agent.tools;
 
+import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.policy.PolicyIndex;
 import com.bank.ai.llm.purpose.PurposeAnalysis;
 import com.bank.ai.llm.purpose.PurposeAnalysisInput;
@@ -75,7 +76,7 @@ class AgentToolsTest {
 
     @Test
     void PolicyLookupTool_존재하는_ID_텍스트_반환() {
-        var policy = new PolicyIndex(Map.of(
+        var policy = new InlinePolicyIndex(Map.of(
                 "DSR_LIMIT_V1", new PolicyIndex.PolicyEntry("DSR 40% 한도", "policy_2026q2")
         ));
         var tool = new PolicyLookupTool(policy);
@@ -85,7 +86,7 @@ class AgentToolsTest {
 
     @Test
     void PolicyLookupTool_없는_ID_오류메시지_반환() {
-        var policy = new PolicyIndex(Map.of());
+        var policy = new InlinePolicyIndex(Map.of());
         var tool = new PolicyLookupTool(policy);
         String result = tool.lookupPolicy("UNKNOWN_POLICY");
         assertThat(result).contains("UNKNOWN_POLICY");

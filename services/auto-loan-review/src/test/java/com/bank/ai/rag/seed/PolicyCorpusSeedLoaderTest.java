@@ -1,5 +1,6 @@
 package com.bank.ai.rag.seed;
 
+import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.policy.PolicyIndex;
 import com.bank.ai.rag.embedding.StubEmbeddingClient;
 import com.bank.ai.rule.config.RuleEngineProperties;
@@ -27,7 +28,7 @@ class PolicyCorpusSeedLoaderTest {
 
     private PolicyCorpusSeedLoader loader;
 
-    private static final PolicyIndex POLICY_INDEX = new PolicyIndex(Map.of(
+    private static final InlinePolicyIndex POLICY_INDEX = new InlinePolicyIndex(Map.of(
             "MORT_DSR_LIMIT_V1", new PolicyIndex.PolicyEntry("DSR 40% 이하", "internal_policy"),
             "CRED_SCORE_MIN_V1", new PolicyIndex.PolicyEntry("최저 신용점수 600", "internal_policy")
     ));
