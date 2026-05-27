@@ -75,3 +75,4 @@ configure(subprojects.findAll {
         testAnnotationProcessor 'org.projectlombok:lombok'
     }
 }
+}
