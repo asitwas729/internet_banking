@@ -12,11 +12,12 @@ import java.util.List;
 /**
  * Prod vs. Shadow AgentOpinion 비교기 — phase-b-operational.md §B3.
  *
- * <p>발산(diverge) 판단 기준 3가지:
+ * <p>발산(diverge) 판단 기준 4가지 (D4-2: ragEnabled=true 시 #4 활성):
  * <ol>
  *   <li>riskLevel 불일치 → {@code RISK_LEVEL_MISMATCH}</li>
  *   <li>|decisionScore 차| > threshold → {@code DECISION_SCORE_GAP}</li>
  *   <li>disagreement 플래그 불일치 → {@code DISAGREEMENT_MISMATCH}</li>
+ *   <li>|policyFlags 수 차| >= citationDiffThreshold → {@code POLICY_FLAG_DIFF} (RAG 컨텍스트 변화 감지)</li>
  * </ol>
  * fallback 의견(fallbackReason != null)은 비교 제외 — 정상 실행 결과끼리만 비교.
  */
@@ -34,6 +35,7 @@ public class ShadowComparisonEvaluator {
      * @param track               공통 트랙
      * @param shadowModel         shadow 모델명
      * @param shadowPromptVersion shadow 프롬프트 버전
+     * @param ragEnabled          shadow run 이 RAG 컨텍스트를 사용했는지 여부
      * @return 비교 결과
      */
     public ShadowComparisonResult evaluate(
@@ -42,7 +44,8 @@ public class ShadowComparisonEvaluator {
             AgentOpinion shadow,
             Track track,
             String shadowModel,
-            String shadowPromptVersion
+            String shadowPromptVersion,
+            boolean ragEnabled
     ) {
         List<String> reasons = new ArrayList<>();
 
@@ -51,7 +54,7 @@ public class ShadowComparisonEvaluator {
             log.debug("[Shadow] revId={} 비교 생략 — fallback prod={} shadow={}",
                     revId, prod.fallbackReason(), shadow.fallbackReason());
             return new ShadowComparisonResult(
-                    revId, prod, shadow, false, List.of(), track, shadowModel, shadowPromptVersion);
+                    revId, prod, shadow, false, List.of(), track, shadowModel, shadowPromptVersion, ragEnabled);
         }
 
         // 1. riskLevel 불일치
@@ -73,6 +76,14 @@ public class ShadowComparisonEvaluator {
             reasons.add("DISAGREEMENT_MISMATCH");
         }
 
+        // 4. policyFlags 수 차이 — RAG 컨텍스트 변화 감지 (ragEnabled 시에만)
+        if (ragEnabled) {
+            int flagDiff = Math.abs(prod.policyFlags().size() - shadow.policyFlags().size());
+            if (flagDiff >= props.citationDiffThreshold()) {
+                reasons.add("POLICY_FLAG_DIFF");
+            }
+        }
+
         boolean diverged = !reasons.isEmpty();
         if (diverged) {
             log.warn("[Shadow] revId={} DIVERGED reasons={}", revId, reasons);
@@ -81,6 +92,6 @@ public class ShadowComparisonEvaluator {
         }
 
         return new ShadowComparisonResult(
-                revId, prod, shadow, diverged, reasons, track, shadowModel, shadowPromptVersion);
+                revId, prod, shadow, diverged, reasons, track, shadowModel, shadowPromptVersion, ragEnabled);
     }
 }

@@ -63,7 +63,8 @@ public class ShadowModeService {
             ShadowComparisonResult result = evaluator.evaluate(
                     revId, prodOpinion, shadowOpinion,
                     decision.track(),
-                    props.model(), props.promptVersion());
+                    props.model(), props.promptVersion(),
+                    props.ragEnabled());
 
             repository.insert(result);
 
