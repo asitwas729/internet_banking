@@ -512,30 +512,36 @@ loan-service 의 LOAN_REVIEW.report_json 도 비변경.
 
 ---
 
-## 13. 진행 단계 (R1~R12)
+## 13. 진행 단계 — Phase D0 ~ D4
 
-| 단계 | 작업 | 산출 |
-|------|------|------|
-| R1 | pgvector·pg_trgm 확장 설치 + `ai_embedding` 테이블 migration | `db/migration/ai_db/V20260701__ai_embedding.sql` |
-| R2 | `EmbeddingClient` 추상 + `VertexAiEmbeddingClient` 구현 (Spring AI starter) | `com.bank.ai.rag.embedding.*` |
-| R3 | `RagSearchService` 하이브리드 검색 SQL + Java 구현 + metaFilter | `com.bank.ai.rag.search.*` + unit test (in-memory data) |
-| R4 | 정책 코퍼스 파서 (`scripts/build_policy_corpus.py` 또는 Java 빌더) + 정책 매트릭스 자동 chunk | `kb_policy_regulation` 적재, 첫 ~500 chunks |
-| R5 | E2E sanity: `retrieve_policy("주담대 DSR 한도")` → §3.2.1 chunk top-1 | 검색 정확도 검증 |
-| R6 | 유사 케이스 코퍼스 batch (`@Scheduled` job, loan-service 또는 별도) + PII 마스킹 + chunk 템플릿 | `kb_similar_cases` 일일 적재 |
-| R7 | Spring AI Tool 정의 (`retrieve_similar_cases`, `retrieve_policy`, `retrieve_faq`) + 호출 cap | `com.bank.ai.rag.tool.*` + unit test |
-| R8 | `GroundingValidator` RAG 연동 (llm-pipeline §5.4 와 통합) + `Citation.id` prefix 처리 | wire 호환 검증 |
-| R9 | `review_report_track1/2/3_v2.yml` prompt 작성 (tools 섹션 + grounding 룰) + `PromptRegistry` 업데이트 | 4 prompt YAML 신규 |
-| R10 | rerank endpoint (`/rerank`) inference-server 추가 + bge-reranker-v2-m3 ONNX + Track 3 적용 | 옵션 phase (R1~R9 후 검토) |
-| R11 | FAQ 코퍼스 (소규모 stub 5~10 케이스) | `kb_internal_faq` 적재 |
-| R12 | E2E smoke: Track 3 신청 → /evaluate → LLM agent 가 retrieve_policy + retrieve_similar_cases 자율 호출 → ReviewReport citations 검증 | loan-service + auto-loan-review + WireMock LLM + ai_db |
-| R13 | 메트릭·모니터링 (`rag.index.*`, `rag.search.*`) + kill switch `ai.rag.enabled` | Micrometer + application.yml |
-| R14 | 문서 동기화 (banking-review-llm §1.7, llm-pipeline §14, RAG ops runbook) | docs |
+> 본 절은 실행 계획의 요약. 상세 단계·산출물·게이트는 **[`docs/plan/phase-d-rag.md`](phase-d-rag.md)** 참조.
+> 본 문서(`rag-corpora.md`)는 design source-of-truth, `phase-d-rag.md` 는 실행 source-of-truth.
 
-**예상 기간**: 3~4주.
-- R1~R5 인프라 + 정책 코퍼스·1.5주
-- R6~R9 유사 케이스 + tool + grounding·1주
-- R10~R12 rerank + FAQ + smoke·0.5주
-- R13~R14 운영·문서·0.5주
+| Phase | 내용 | 기간 |
+|-------|------|------|
+| **D0** — 아키텍처 결정 + 사전 정비 | 코드 오케스트레이션 vs 자율 tool calling 결정, Spring AI 도입 컨센서스, `PolicyIndex` interface 추출 합의, 본 문서 갱신 | 0.5 주 |
+| **D1** — 인프라 + 정책 코퍼스 P1 | Spring AI 1.x BOM + Vertex embedding starter, V4 마이그레이션 (pgvector + pg_trgm), `EmbeddingClient` + `SpringAiEmbeddingClient` + `StubEmbeddingClient`, `RagSearchService` 하이브리드 검색, 정책 코퍼스 13 chunks seed (`ai.policy.inline` 8 + 매트릭스 5 셀) | 1.5 주 |
+| **D2** — Tool + Grounding 통합 | `PolicyIndex` interface 분리 (Inline/Rag 두 구현체), `application.yml` 의 `ai.rag.*` 섹션, `RagRetrievalService` 코드 오케스트레이션 + `AgentLoopGuard` 통합, `ReviewReportInput.ragContext` + 프롬프트 v2 4 종, `GroundingValidator` Citation prefix 분기 | 1 주 |
+| **D3** — 유사 케이스 코퍼스 P2 | `auto-loan-review` `/api/internal/embeddings/batch` endpoint, `loan-service` `SimilarCaseExporter` + 일배치 `@Scheduled`, PII 이중 마스킹 smoke, 합성 1 만 건 cold-start seed | 0.5 주 |
+| **D4** — 검증 + 운영 cutover | `AgentMetricsRecorder` RAG 메트릭 4 종 추가, V5 마이그레이션 (`shadow_run_result.rag_enabled`), Shadow Mode 가 V1(인라인)/V2(RAG) 동시 산출, E2E smoke 5 케이스, canary 단계적 전환 (shadow → 5% → 25% → 100%) | 1 주 |
+
+**예상 기간**: **4 ~ 4.5 주** (D3·D4 일부 병렬 가능).
+
+### 13.1 본 문서 §8 ~ §12 의 변경점
+
+- **§8 Spring AI Tool 명세** — D Phase 에서는 LLM 자율 호출 없이 **코드 오케스트레이션**. `@Tool` 어노테이션 기반 자율 호출은 후속 옵션 phase **D-F3 Agentic RAG** 로 분리.
+- **§10 인덱스 구축 파이프라인** — `scripts/build_policy_corpus.py` Python 빌더 대신 **Java seed loader** (`com.bank.ai.rag.seed.*`) 로 출발. 외부 PDF 파서 (금감원 가이드) 는 **D-F4** 로 분리.
+- **§12 LLM 파이프라인 인터페이스** — `LlmClient` 인터페이스 유지, 내부 구현체만 `SpringAiLlmClient` 로 점진 교체. 단일 PR 로 전면 swap 하지 않음.
+
+### 13.2 옵션 phase (D 종료 후)
+
+| Phase | 트리거 | 본 문서 참조 |
+|-------|--------|--------------|
+| D-F1 — FAQ 코퍼스 P3 | 심사원 요청 누적 | §1, §4.3 |
+| D-F2 — bge-reranker-v2-m3 | Track 3 검색 정확도 부족 | §6 |
+| D-F3 — Agentic RAG | 운영 6 개월 후 | §8 (자율 호출 패턴) |
+| D-F4 — 외부 정책 PDF 적재 | 정책위 요청 | §10.1 |
+| D-F5 — bge-m3 자체 ONNX | Vertex 비용·latency 부담 | §3.2 옵션 B |
 
 ---
 
