@@ -96,6 +96,9 @@ ai:
     fallback-after-rpm: true                  # RPM 초과 시 즉시 fallback (false = 대기, 개발 환경용)
     rate-reset-hour: 0                        # RPD 리셋 UTC 시각 (0 = 자정)
 
+  # ---- D3: 내부 API 토큰 (loan-service → auto-loan-review 배치 적재) ----
+  internal-token: ${AI_INTERNAL_TOKEN:}          # 미설정 시 모든 /api/internal/* 요청 거부
+
   # ---- LLM 파이프라인 (Phase 1.5/1.6) ----
   # plan/llm-pipeline.md §0 의 운영 원칙: kill switch + provider 추상화 + 토큰 cap.
   # 현 단계는 stub provider 만 — 운영 cutover 시 gemini-openai-compat 로 변경.
