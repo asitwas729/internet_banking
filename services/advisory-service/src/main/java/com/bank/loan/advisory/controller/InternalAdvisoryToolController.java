@@ -4,11 +4,13 @@ import com.bank.common.web.ApiResponse;
 import com.bank.loan.advisory.dto.CohortStatsResponse;
 import com.bank.loan.advisory.dto.PolicyCitationResponse;
 import com.bank.loan.advisory.dto.ReviewerHistoryResponse;
+import com.bank.loan.advisory.kafka.AdvisorySkewSimulator;
 import com.bank.loan.advisory.service.AdvisoryToolQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class InternalAdvisoryToolController {
 
     private final AdvisoryToolQueryService service;
+    private final AdvisorySkewSimulator skewSimulator;
 
     @Operation(summary = "정책 인용 검색",
             description = "query 텍스트로 활성 정책 문서 청크를 벡터 검색한다. LLM get_policy_citation tool 전용.")
@@ -36,6 +39,17 @@ public class InternalAdvisoryToolController {
             @RequestParam Long reviewerId,
             @RequestParam(defaultValue = "90") int days) {
         return ApiResponse.ok(service.queryReviewerHistory(reviewerId, days));
+    }
+
+    @Operation(summary = "[L4 실험] Kafka 파티션 skew 시뮬레이션",
+            description = "reviewerId를 key로 N건 발행. 파티셔너 전후 파티션 분포 비교용. " +
+                    "use-skew-aware-partitioner=false/true 재기동 후 비교. " +
+                    "관찰: docker exec ib-kafka /opt/kafka/bin/kafka-run-class.sh " +
+                    "kafka.tools.GetOffsetShell --bootstrap-server localhost:9092 --topic advisory.test.skew.v1")
+    @PostMapping("/skew-sim")
+    public ApiResponse<AdvisorySkewSimulator.SimulationResult> runSkewSimulation(
+            @RequestParam(defaultValue = "1000") int messages) {
+        return ApiResponse.ok(skewSimulator.simulate(messages));
     }
 
     @Operation(summary = "코호트 편향 통계 조회",
