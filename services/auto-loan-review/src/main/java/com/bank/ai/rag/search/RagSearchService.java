@@ -2,6 +2,8 @@ package com.bank.ai.rag.search;
 
 import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.rag.embedding.EmbeddingClient;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -9,7 +11,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,8 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class RagSearchService {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final JdbcClient jdbcClient;
     private final EmbeddingClient embeddingClient;
@@ -52,19 +55,21 @@ public class RagSearchService {
         String vecLiteral = toVectorLiteral(queryVec);
         String metaJson = metaFilter != null && !metaFilter.isEmpty()
                 ? toJsonb(metaFilter) : null;
+        String tsQuery = toTsQuery(query); // null 이면 FTS 스킵
+
+        Map<String, Object> optionalParams = new HashMap<>();
+        if (metaJson != null) optionalParams.put("metaFilter", metaJson);
+        if (tsQuery != null)  optionalParams.put("queryTsq", tsQuery);
 
         Instant start = Instant.now();
         try {
-            List<Chunk> results = jdbcClient.sql(buildSql(metaJson != null))
+            List<Chunk> results = jdbcClient.sql(buildSql(metaJson != null, tsQuery != null))
                     .param("corpus", corpus)
                     .param("queryVec", vecLiteral)
-                    .param("queryTsq", toTsQuery(query))
                     .param("alpha", props.alpha())
                     .param("threshold", props.similarityThreshold())
                     .param("k", limit)
-                    .paramSource(metaJson != null
-                            ? Map.of("metaFilter", metaJson)
-                            : Collections.emptyMap())
+                    .paramSource(optionalParams)
                     .query(this::mapChunk)
                     .list();
             metricsRecorder.recordRagSearchLatency(corpus, Duration.between(start, Instant.now()));
@@ -126,35 +131,50 @@ public class RagSearchService {
 
     // ─────────────────────────────────────────────────────────────────────
 
-    private static String buildSql(boolean withMetaFilter) {
+    private static String buildSql(boolean withMetaFilter, boolean withFts) {
         String metaCond = withMetaFilter
                 ? "AND metadata @> :metaFilter::jsonb" : "";
 
+        if (withFts) {
+            return """
+                    WITH vec AS (
+                        SELECT id, source_id, chunk_text, chunk_summary, metadata,
+                               1 - (embedding <=> CAST(:queryVec AS vector)) AS vec_score
+                        FROM ai_embedding
+                        WHERE corpus = :corpus
+                          AND is_active
+                          %s
+                        ORDER BY embedding <=> CAST(:queryVec AS vector)
+                        LIMIT 50
+                    ),
+                    fts AS (
+                        SELECT id,
+                               ts_rank_cd(fts_tokens, to_tsquery('simple', :queryTsq)) AS fts_score
+                        FROM ai_embedding
+                        WHERE corpus = :corpus
+                          AND is_active
+                          AND fts_tokens @@ to_tsquery('simple', :queryTsq)
+                        LIMIT 50
+                    )
+                    SELECT v.id, v.source_id, v.chunk_text, v.chunk_summary, v.metadata::text,
+                           (:alpha * v.vec_score + (1 - :alpha) * COALESCE(f.fts_score, 0)) AS hybrid_score
+                    FROM vec v
+                    LEFT JOIN fts f USING (id)
+                    WHERE (:alpha * v.vec_score + (1 - :alpha) * COALESCE(f.fts_score, 0)) >= :threshold
+                    ORDER BY hybrid_score DESC
+                    LIMIT :k
+                    """.formatted(metaCond);
+        }
+
+        // FTS 스킵 — 특수문자 전용 쿼리 등 tsquery 생성 불가 시 벡터 검색만 수행
         return """
-                WITH vec AS (
-                    SELECT id, source_id, chunk_text, chunk_summary, metadata,
-                           1 - (embedding <=> CAST(:queryVec AS vector)) AS vec_score
-                    FROM ai_embedding
-                    WHERE corpus = :corpus
-                      AND is_active
-                      %s
-                    ORDER BY embedding <=> CAST(:queryVec AS vector)
-                    LIMIT 50
-                ),
-                fts AS (
-                    SELECT id,
-                           ts_rank_cd(fts_tokens, to_tsquery('simple', :queryTsq)) AS fts_score
-                    FROM ai_embedding
-                    WHERE corpus = :corpus
-                      AND is_active
-                      AND fts_tokens @@ to_tsquery('simple', :queryTsq)
-                    LIMIT 50
-                )
-                SELECT v.id, v.source_id, v.chunk_text, v.chunk_summary, v.metadata::text,
-                       (:alpha * v.vec_score + (1 - :alpha) * COALESCE(f.fts_score, 0)) AS hybrid_score
-                FROM vec v
-                LEFT JOIN fts f USING (id)
-                WHERE (:alpha * v.vec_score + (1 - :alpha) * COALESCE(f.fts_score, 0)) >= :threshold
+                SELECT id, source_id, chunk_text, chunk_summary, metadata::text,
+                       1 - (embedding <=> CAST(:queryVec AS vector)) AS hybrid_score
+                FROM ai_embedding
+                WHERE corpus = :corpus
+                  AND is_active
+                  %s
+                  AND (1 - (embedding <=> CAST(:queryVec AS vector))) >= :threshold
                 ORDER BY hybrid_score DESC
                 LIMIT :k
                 """.formatted(metaCond);
@@ -183,33 +203,31 @@ public class RagSearchService {
         return sb.toString();
     }
 
+    /**
+     * 자연어 쿼리를 PostgreSQL simple tsquery 토큰으로 변환.
+     * 특수문자만 있는 경우 등 유효 토큰이 없으면 {@code null} 반환 → FTS 스킵.
+     */
     private static String toTsQuery(String query) {
-        // 공백 → & 연산자 (simple FTS)
-        return query.trim().replaceAll("\\s+", " & ").replaceAll("[^가-힣a-zA-Z0-9&_ ]", "");
+        String processed = query.trim()
+                .replaceAll("\\s+", " & ")
+                .replaceAll("[^가-힣a-zA-Z0-9&_ ]", "")
+                .trim();
+        return processed.isBlank() ? null : processed;
     }
 
+    /** JSONB 직렬화 — ObjectMapper 사용으로 특수문자 이스케이프 보장. */
     private static String toJsonb(Map<String, Object> filter) {
-        // 단순 JSON 직렬화 (Jackson 미사용 — 의존 최소화)
-        var sb = new StringBuilder("{");
-        boolean first = true;
-        for (var entry : filter.entrySet()) {
-            if (!first) sb.append(',');
-            sb.append('"').append(entry.getKey()).append("\":");
-            Object v = entry.getValue();
-            if (v instanceof String s) sb.append('"').append(s).append('"');
-            else sb.append(v);
-            first = false;
+        try {
+            return MAPPER.writeValueAsString(filter);
+        } catch (Exception e) {
+            return "{}";
         }
-        sb.append("}");
-        return sb.toString();
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> parseJsonb(String json) {
         if (json == null || json.isBlank() || "{}".equals(json.trim())) return Map.of();
-        // Jackson 이 classpath 에 있으므로 간단히 ObjectMapper 사용
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, HashMap.class);
+            return MAPPER.readValue(json, new TypeReference<HashMap<String, Object>>() {});
         } catch (Exception e) {
             return Map.of();
         }
