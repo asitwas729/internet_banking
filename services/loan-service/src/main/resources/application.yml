@@ -23,6 +23,16 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+ai:
+  # ---- D3: 유사 케이스 코퍼스 내보내기 ----
+  similar-case-export:
+    enabled: ${SIMILAR_CASE_EXPORT_ENABLED:false}         # kill switch
+    auto-review-url: ${AUTO_REVIEW_URL:http://localhost:8086}
+    internal-token: ${AI_INTERNAL_TOKEN:}
+    batch-size: 200
+    lookback-days: 1
+    cron: "0 0 17 * * *"                                  # 02:00 KST = 17:00 UTC
+
 management:
   endpoints:
     web:
