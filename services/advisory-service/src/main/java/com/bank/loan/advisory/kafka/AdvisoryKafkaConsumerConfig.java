@@ -77,6 +77,19 @@ public class AdvisoryKafkaConsumerConfig {
         p.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG,    "read_committed");
 
         // 튜닝 파라미터 — application.yml advisory.consumer.* 에서 주입
+        // L8: Partition Assignment Strategy (재기동만으로 전략 교체 실험 가능)
+        p.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, props.getAssignmentStrategy());
+
+        // L8: Static Group Membership (null이면 동적 멤버십 유지)
+        if (props.getGroupInstanceId() != null && !props.getGroupInstanceId().isBlank()) {
+            p.put(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, props.getGroupInstanceId());
+        }
+
+        // L8: Rack Awareness (비어있으면 미적용)
+        if (!props.getClientRack().isBlank()) {
+            p.put(ConsumerConfig.CLIENT_RACK_CONFIG, props.getClientRack());
+        }
+
         p.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG,               props.getFetchMinBytes());
         p.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG,             props.getFetchMaxWaitMs());
         p.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG,               props.getFetchMaxBytes());

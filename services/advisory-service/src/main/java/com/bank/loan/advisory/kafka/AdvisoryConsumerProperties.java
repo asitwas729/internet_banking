@@ -43,4 +43,24 @@ public class AdvisoryConsumerProperties {
     // DLQ 재시도
     private long dlqBackoffIntervalMs = 1_000;
     private long dlqMaxAttempts       = 3;
+
+    // L8 — Partition Assignment Strategy
+    // 실험: Range / RoundRobin / StickyAssignor / CooperativeStickyAssignor 비교
+    //   Range                  : 토픽별 파티션을 연속 블록으로 할당. 토픽 수 증가 시 불균형 가능
+    //   RoundRobin             : 전체 파티션을 순서대로 하나씩 할당. 균등하지만 eager rebalance
+    //   StickyAssignor         : 기존 할당 최대 유지. 단 rebalance 중 전체 정지 (eager)
+    //   CooperativeStickyAssignor: 재할당 안 된 파티션은 계속 처리 (incremental cooperative rebalance)
+    private String assignmentStrategy =
+            "org.apache.kafka.clients.consumer.CooperativeStickyAssignor";
+
+    // L8 — Static Group Membership
+    // null(기본): 동적 멤버십 — 재시작마다 새 member-id 발급 → rebalance 발생
+    // 값 설정: 정적 멤버십 — 재시작 후 session.timeout.ms 내 복귀 시 rebalance 안 일어남
+    // 실험: ADVISORY_CONSUMER_INSTANCE_ID 환경변수로 인스턴스별 다른 값 주입
+    private String groupInstanceId = null;
+
+    // L8 — Rack Awareness
+    // 같은 rack의 replica에서 읽어 크로스 AZ 대역폭 절감
+    // 브로커에 replica.selector.class 설정 필요 (docker-compose.yml 참고)
+    private String clientRack = "";
 }

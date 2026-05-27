@@ -142,7 +142,50 @@ docker exec ib-kafka /opt/kafka/bin/kafka-run-class.sh \
 
 ## L8 — Partition Assignment + Static Membership
 
-*(미진행)*
+**실험 준비: 컨슈머 3개 띄우기**
+```bash
+# 터미널 3개에서 각각 다른 INSTANCE_ID로 기동
+ADVISORY_CONSUMER_INSTANCE_ID=advisory-consumer-0 ./gradlew :services:loan-service:bootRun
+ADVISORY_CONSUMER_INSTANCE_ID=advisory-consumer-1 ./gradlew :services:loan-service:bootRun
+ADVISORY_CONSUMER_INSTANCE_ID=advisory-consumer-2 ./gradlew :services:loan-service:bootRun
+
+# 파티션 할당 확인
+docker exec ib-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --describe --group advisory-quarantine-notifier
+```
+
+**실험 1: Assignment Strategy 비교** (컨슈머 1→2→3 순차 추가)
+
+| strategy | 컨슈머 추가 시 rebalance 중 처리 정지 여부 | 할당 균등도 |
+|---|---|---|
+| RangeAssignor | | |
+| RoundRobinAssignor | | |
+| StickyAssignor | | |
+| CooperativeStickyAssignor | | |
+
+**rebalance 로그 (CooperativeSticky vs Sticky 비교):**
+```
+(여기에 붙여넣기)
+```
+
+**실험 2: Static Membership**
+- `group-instance-id` 설정 전 재시작 시 rebalance 발생 여부:
+- `group-instance-id` 설정 후 재시작 시 rebalance 발생 여부:
+- session.timeout.ms(45s) 내 복귀 vs 초과 시 동작 차이:
+
+**실험 3: offsets.retention.minutes**
+```bash
+# 그룹 정지 후 기본값(1440분=1일) vs 10080분(7일) 비교
+# 그룹 offset 확인
+docker exec ib-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --describe --group advisory-quarantine-notifier
+```
+- 그룹 정지 후 offset 유지 시간:
+- 재시작 후 auto.offset.reset 동작 여부:
+
+**학습 결론:**
 
 ---
 
