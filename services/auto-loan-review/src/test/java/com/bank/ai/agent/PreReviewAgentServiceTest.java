@@ -12,6 +12,7 @@ import com.bank.ai.llm.purpose.PurposeAnalysisInput;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
 import com.bank.ai.llm.report.GroundingValidator;
 import com.bank.ai.llm.support.LlmRequestRateMeter;
+import com.bank.ai.rag.retrieval.RagRetrievalService;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.dto.AutoReviewResponse;
 import com.bank.ai.review.service.AutoReviewService;
@@ -51,6 +52,7 @@ class PreReviewAgentServiceTest {
     @Mock GroundingValidator groundingValidator;
     @Mock SemanticDisagreementDetector disagreementDetector;
     @Mock RejectionReasonAgentService rejectionReasonAgentService;
+    @Mock RagRetrievalService ragRetrievalService;
 
     private AgentProperties enabledProps;
     private PreReviewAgentService service;
@@ -60,7 +62,10 @@ class PreReviewAgentServiceTest {
         enabledProps = new AgentProperties(true, 6, 2, true, 0);
         service = new PreReviewAgentService(enabledProps, rateMeter, llmClient,
                 reviewService, purposeAnalysisService, groundingValidator, disagreementDetector,
-                rejectionReasonAgentService);
+                rejectionReasonAgentService, ragRetrievalService);
+        // RAG 기본 stub — disabled 환경, 빈 리스트 반환 (lenient: Track 1/2 미호출)
+        lenient().when(ragRetrievalService.retrieve(any(), any(), any()))
+                .thenReturn(List.of());
         // Track 3 정상 경로 기본 stub (Track1/2 에서는 미호출 — lenient)
         lenient().when(groundingValidator.validateNumericClaims(any(), any()))
                 .thenReturn(GroundingValidator.ValidationResult.ok());
@@ -234,7 +239,8 @@ class PreReviewAgentServiceTest {
         var tightProps = new AgentProperties(true, 1, 2, true, 0);
         var tightService = new PreReviewAgentService(
                 tightProps, rateMeter, llmClient, reviewService, purposeAnalysisService,
-                groundingValidator, disagreementDetector, rejectionReasonAgentService);
+                groundingValidator, disagreementDetector, rejectionReasonAgentService,
+                ragRetrievalService);
 
         var result = tightService.run(1L, fullRequest(), track3Decision());
 
