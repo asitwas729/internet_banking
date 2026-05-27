@@ -54,7 +54,7 @@ class ReviewReportServiceTest {
                     new PolicyIndex.PolicyEntry("연령 최저", "civil_law_§4"))
     ));
 
-    private final GroundingValidator validator = new GroundingValidator(POLICY);
+    private final GroundingValidator validator = new GroundingValidator(POLICY, java.util.Optional.empty());
     private final TemplateFallback fallback = new TemplateFallback(POLICY);
     private final StubLlmClient stub = new StubLlmClient(new ObjectMapper());
     private final PromptRegistry registry = loadRegistry();

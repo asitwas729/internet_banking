@@ -6,14 +6,18 @@ import com.bank.ai.agent.RiskLevel;
 import com.bank.ai.agent.SimulationResult;
 import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.policy.PolicyIndex;
+import com.bank.ai.rag.policy.RagPolicyIndex;
 import com.bank.ai.rule.domain.Track;
 import com.bank.ai.rule.domain.TrackDecision;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class GroundingValidatorTest {
 
@@ -22,7 +26,7 @@ class GroundingValidatorTest {
             "B_V1", new PolicyIndex.PolicyEntry("정책 B", "src"),
             "C_V1", new PolicyIndex.PolicyEntry("정책 C", "src")
     ));
-    private final GroundingValidator validator = new GroundingValidator(POLICY);
+    private final GroundingValidator validator = new GroundingValidator(POLICY, Optional.empty());
 
     private ReviewReport withCitations(Track track, List<String> citationIds) {
         var cs = citationIds.stream()
@@ -172,5 +176,60 @@ class GroundingValidatorTest {
         var result = validator.validateNumericClaims(opinion, TRACK3_DECISION);
         assertThat(result.passed()).isFalse();
         assertThat(result.issues()).anyMatch(s -> s.contains("simulation") && s.contains("decisionScore 범위 초과"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // D2-6: prefix 분기 TC
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    void inline_prefix_citation_통과() {
+        // "inline:A_V1" → strip prefix → "A_V1" in InlinePolicyIndex
+        var r = withCitations(Track.TRACK_1, List.of("inline:A_V1"));
+        assertThat(new GroundingValidator(POLICY, Optional.empty()).validate(r).passed()).isTrue();
+    }
+
+    @Test
+    void rag_prefix_citation_RagPolicyIndex_통과() {
+        var ragIndex = mock(RagPolicyIndex.class);
+        when(ragIndex.exists("chunk-001")).thenReturn(true);
+        var v = new GroundingValidator(POLICY, Optional.of(ragIndex));
+
+        var r = withCitations(Track.TRACK_1, List.of("rag:chunk-001"));
+        assertThat(v.validate(r).passed()).isTrue();
+    }
+
+    @Test
+    void mixed_inline_rag_Track2_citations_통과() {
+        var ragIndex = mock(RagPolicyIndex.class);
+        when(ragIndex.exists("chunk-002")).thenReturn(true);
+        var v = new GroundingValidator(POLICY, Optional.of(ragIndex));
+
+        // Track 2: "inline:A_V1" + "rag:chunk-002" → 2개, 모두 존재
+        var r = withCitations(Track.TRACK_2, List.of("inline:A_V1", "rag:chunk-002"));
+        assertThat(v.validate(r).passed()).isTrue();
+    }
+
+    @Test
+    void rag_prefix_RagPolicyIndex_비활성시_실패() {
+        // ragPolicyIndex=null → rag: citation 항상 미존재
+        var v = new GroundingValidator(POLICY, Optional.empty());
+
+        var r = withCitations(Track.TRACK_1, List.of("rag:chunk-003"));
+        var result = v.validate(r);
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).anyMatch(s -> s.contains("rag:chunk-003") && s.contains("미존재"));
+    }
+
+    @Test
+    void rag_chunk_미존재시_실패() {
+        var ragIndex = mock(RagPolicyIndex.class);
+        when(ragIndex.exists("ghost-chunk")).thenReturn(false);
+        var v = new GroundingValidator(POLICY, Optional.of(ragIndex));
+
+        var r = withCitations(Track.TRACK_1, List.of("rag:ghost-chunk"));
+        var result = v.validate(r);
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).anyMatch(s -> s.contains("rag:ghost-chunk"));
     }
 }
