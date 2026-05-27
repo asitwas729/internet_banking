@@ -59,7 +59,8 @@ import static org.mockito.Mockito.times;
                 "spring.flyway.locations=classpath:db/h2-migration",
                 "spring.autoconfigure.exclude=" +
                         "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration," +
-                        "org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration"
+                        "org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration," +
+                        "org.springframework.ai.model.vertexai.autoconfigure.embedding.VertexAiTextEmbeddingAutoConfiguration"
         }
 )
 class AutoReviewPipelineSmokeTest {

@@ -36,7 +36,7 @@ import static org.mockito.Mockito.when;
         "spring.flyway.locations=classpath:db/h2-migration",
         "spring.autoconfigure.exclude=" +
                 "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration," +
-                "org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration",
+                "org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration,org.springframework.ai.model.vertexai.autoconfigure.embedding.VertexAiTextEmbeddingAutoConfiguration",
         "ai.llm.provider=stub",
         "ai.shadow.enabled=true",
         "ai.shadow.model=stub-v1",
