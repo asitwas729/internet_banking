@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 하이브리드 검색 서비스 — 벡터 cosine + FTS BM25 가중합.
@@ -74,6 +75,40 @@ public class RagSearchService {
                         .param("id", id)
                         .query(Boolean.class)
                         .single());
+    }
+
+    /** sourceId 존재 여부 — RagPolicyIndex.exists() 에서 citation 검증 시 사용. */
+    public boolean existsBySourceId(String corpus, String sourceId) {
+        return Boolean.TRUE.equals(
+                jdbcClient.sql("""
+                        SELECT EXISTS(
+                          SELECT 1 FROM ai_embedding
+                          WHERE corpus = :corpus AND source_id = :sourceId AND is_active
+                        )""")
+                        .param("corpus", corpus)
+                        .param("sourceId", sourceId)
+                        .query(Boolean.class)
+                        .single());
+    }
+
+    /** sourceId 로 단건 청크 조회 — RagPolicyIndex.get() 에서 사용. */
+    public Optional<Chunk> findBySourceId(String corpus, String sourceId) {
+        try {
+            return jdbcClient.sql("""
+                    SELECT id, source_id, chunk_text, chunk_summary, metadata::text,
+                           1.0 AS hybrid_score
+                    FROM ai_embedding
+                    WHERE corpus = :corpus AND source_id = :sourceId AND is_active
+                    LIMIT 1
+                    """)
+                    .param("corpus", corpus)
+                    .param("sourceId", sourceId)
+                    .query(this::mapChunk)
+                    .optional();
+        } catch (Exception e) {
+            log.error("RagSearchService: findBySourceId 실패 corpus={} sourceId={}", corpus, sourceId, e);
+            return Optional.empty();
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────

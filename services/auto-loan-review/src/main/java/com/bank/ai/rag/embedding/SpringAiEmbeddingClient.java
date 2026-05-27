@@ -12,7 +12,6 @@ import java.util.List;
  *
  * <p>{@code ai.rag.embedding.provider=vertex} 시 활성.
  * {@code spring.ai.vertex.ai.embedding.*} 설정으로 project-id·location·model 지정.
- * 운영 provider swap 은 {@code AI_RAG_EMB_PROVIDER} 환경 변수 한 줄 변경.
  */
 @Component
 @ConditionalOnProperty(prefix = "ai.rag.embedding", name = "provider", havingValue = "vertex")
@@ -23,19 +22,16 @@ public class SpringAiEmbeddingClient implements EmbeddingClient {
 
     @Override
     public float[] embed(String text) {
-        return toFloatArray(embeddingModel.embed(text));
+        // Spring AI 1.0.0: EmbeddingModel.embed(String) → float[]
+        return embeddingModel.embed(text);
     }
 
     @Override
     public List<float[]> embedAll(List<String> texts) {
-        return embeddingModel.embed(texts).stream()
-                .map(this::toFloatArray)
+        // Spring AI 1.0.0: embedForResponse → EmbeddingResponse → List<Embedding>
+        // Spring AI 1.0.0: Embedding.getOutput() → float[]
+        return embeddingModel.embedForResponse(texts).getResults().stream()
+                .map(e -> e.getOutput())
                 .toList();
-    }
-
-    private float[] toFloatArray(List<Double> doubles) {
-        float[] arr = new float[doubles.size()];
-        for (int i = 0; i < doubles.size(); i++) arr[i] = doubles.get(i).floatValue();
-        return arr;
     }
 }

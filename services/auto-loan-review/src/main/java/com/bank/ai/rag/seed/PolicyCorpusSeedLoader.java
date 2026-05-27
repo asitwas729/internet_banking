@@ -1,5 +1,6 @@
 package com.bank.ai.rag.seed;
 
+import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.policy.PolicyIndex;
 import com.bank.ai.rag.embedding.EmbeddingClient;
 import com.bank.ai.rule.config.RuleEngineProperties;
@@ -39,7 +40,7 @@ public class PolicyCorpusSeedLoader implements ApplicationRunner {
 
     private final JdbcClient jdbcClient;
     private final EmbeddingClient embeddingClient;
-    private final PolicyIndex policyIndex;
+    private final InlinePolicyIndex policyIndex;
     private final RuleEngineProperties ruleEngineProps;
 
     @Override

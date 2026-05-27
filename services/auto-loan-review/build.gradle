@@ -14,7 +14,7 @@ dependencyManagement {
 dependencies {
     // ── Spring AI (BOM 관리 — 버전 생략) ─────────────────────────────────
     implementation 'org.springframework.ai:spring-ai-openai'                                       // Gemini OpenAI-compat LLM 클라이언트 (A1)
-    implementation 'org.springframework.ai:spring-ai-vertex-ai-embedding-spring-boot-starter'      // D1: RAG 임베딩 (Vertex AI text-embedding-005)
+    implementation 'org.springframework.ai:spring-ai-starter-model-vertex-ai-embedding'             // D1: RAG 임베딩 (Vertex AI text-embedding-005)
 
     // ── B1: Audit Log — JDBC + Flyway ────────────────────────────────────
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'

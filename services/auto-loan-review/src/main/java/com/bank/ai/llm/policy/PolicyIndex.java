@@ -1,37 +1,25 @@
 package com.bank.ai.llm.policy;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
-import java.util.Map;
-
 /**
- * 인라인 정책 텍스트 인덱스 — plan/llm-pipeline.md §14.
+ * 정책 인덱스 인터페이스 — phase-d-rag.md D2-1.
  *
- * <p>application.yml {@code ai.policy.inline} 섹션 바인딩. citation id → policy entry 룩업.
- *
- * <p>Phase 1.7 RAG 도입 시 본 인덱스 의미가 PolicyChunk vector store id 로 swap.
- * 인터페이스 (exists / get) 는 비변경 — ReviewReportService·GroundingValidator 호환.
+ * <p>Phase 1.6 까지는 {@link InlinePolicyIndex} (application.yml 인라인) 가 단독 구현.
+ * {@code ai.rag.enabled=true} 시 {@link com.bank.ai.rag.policy.RagPolicyIndex} 가 추가 등록되며,
+ * GroundingValidator 는 citation id prefix ({@code inline:} / {@code rag:}) 로 구현체를 선택.
  */
-@ConfigurationProperties(prefix = "ai.policy")
-public record PolicyIndex(Map<String, PolicyEntry> inline) {
+public interface PolicyIndex {
 
-    public PolicyIndex {
-        inline = inline != null ? Map.copyOf(inline) : Map.of();
-    }
+    /** id 가 인덱스에 존재하는지 확인. */
+    boolean exists(String id);
 
-    public boolean exists(String id) {
-        return inline.containsKey(id);
-    }
-
-    public PolicyEntry get(String id) {
-        return inline.get(id);
-    }
+    /** id 에 대응하는 정책 항목 반환 (없으면 null). */
+    PolicyEntry get(String id);
 
     /**
      * @param text   심사원·LLM 노출용 정책 본문
      * @param source 출처 식별자 (예: "internal_policy_2026q2")
      */
-    public record PolicyEntry(String text, String source) {
+    record PolicyEntry(String text, String source) {
 
         public PolicyEntry {
             text = text != null ? text : "";
