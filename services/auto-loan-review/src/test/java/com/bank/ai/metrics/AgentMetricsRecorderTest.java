@@ -134,4 +134,51 @@ class AgentMetricsRecorderTest {
         assertThat(counter).isNotNull();
         assertThat(counter.count()).isEqualTo(1.0);
     }
+
+    // ── TC 6: RAG 메트릭 4종 — D4-1 ─────────────────────────────────────────
+
+    @Test
+    void recordRagSearchLatency_timerRecorded() {
+        recorder.recordRagSearchLatency("policy_regulation", Duration.ofMillis(120));
+
+        var timer = registry.find("rag.search.latency.seconds")
+                .tag(AgentMetricsTags.CORPUS, "policy_regulation").timer();
+        assertThat(timer).isNotNull();
+        assertThat(timer.count()).isEqualTo(1);
+    }
+
+    @Test
+    void recordRagSearchMiss_counterIncremented() {
+        recorder.recordRagSearchMiss("similar_cases");
+        recorder.recordRagSearchMiss("similar_cases");
+
+        Counter counter = registry.find("rag.search.miss.total")
+                .tag(AgentMetricsTags.CORPUS, "similar_cases").counter();
+        assertThat(counter).isNotNull();
+        assertThat(counter.count()).isEqualTo(2.0);
+    }
+
+    @Test
+    void recordRagChunkCount_distributionSummaryRecorded() {
+        recorder.recordRagChunkCount("policy_regulation", 5);
+        recorder.recordRagChunkCount("policy_regulation", 3);
+
+        var summary = registry.find("rag.chunk.count")
+                .tag(AgentMetricsTags.CORPUS, "policy_regulation").summary();
+        assertThat(summary).isNotNull();
+        assertThat(summary.count()).isEqualTo(2);
+        assertThat(summary.mean()).isEqualTo(4.0);
+    }
+
+    @Test
+    void recordRagCitationCount_distributionSummaryRecorded() {
+        recorder.recordRagCitationCount(Track.TRACK_2, 2);
+        recorder.recordRagCitationCount(Track.TRACK_2, 3);
+
+        var summary = registry.find("rag.citation.count.per.report")
+                .tag(AgentMetricsTags.TRACK, "TRACK_2").summary();
+        assertThat(summary).isNotNull();
+        assertThat(summary.count()).isEqualTo(2);
+        assertThat(summary.mean()).isEqualTo(2.5);
+    }
 }
