@@ -86,7 +86,6 @@ services:
       timeout: 5s
       retries: 5
 
-
   ai-db:
     image: pgvector/pgvector:pg16
     container_name: ib-ai-db
@@ -227,3 +226,4 @@ volumes:
   redis-data:
   prometheus-data:
   grafana-data:
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.
