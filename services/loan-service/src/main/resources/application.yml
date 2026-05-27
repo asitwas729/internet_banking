@@ -98,6 +98,9 @@ advisory:
     experiment-delay-ms: 0        # 실험: 양수 설정 시 처리 지연 시뮬레이션 (rebalance 유발)
   producer:
     use-skew-aware-partitioner: false  # L4 실험: true로 바꾸고 재기동 → hot-key 분산 효과 비교
+  kafka:
+    use-avro: false                    # L3 실험: true로 바꾸고 재기동 → Avro 직렬화로 전환
+    schema-registry-url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
     dlq-backoff-interval-ms: 1000
     dlq-max-attempts: 3
     # L8 실험: 아래 값 변경 후 재기동으로 전략 비교

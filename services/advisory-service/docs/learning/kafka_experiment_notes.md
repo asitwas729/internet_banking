@@ -191,7 +191,53 @@ docker exec ib-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
 
 ## L3 — Avro + Schema Registry
 
-*(미진행)*
+**실험 준비**
+```bash
+# schema-registry 기동 확인
+curl http://localhost:8081/subjects
+```
+
+**실험 1: String → Avro 마이그레이션**
+```yaml
+# application.yml
+advisory.kafka.use-avro: false  # 1단계: String 발행
+advisory.kafka.use-avro: true   # 2단계: Avro 발행
+```
+- String 발행 시 kafka-console-consumer 출력:
+- Avro 발행 시 kafka-console-consumer 출력 (바이너리):
+- Schema Registry에 등록된 스키마 확인:
+```bash
+curl http://localhost:8081/subjects
+curl http://localhost:8081/subjects/advisory.quarantine.triggered.v1-value/versions/latest
+```
+결과:
+
+**실험 2: payload 크기 비교**
+
+| 직렬화 | 메시지 크기(bytes) |
+|---|---|
+| JSON String | |
+| Avro binary | |
+
+**실험 3: Schema Evolution — BACKWARD 호환성**
+```bash
+# v2 스키마(severity 필드 추가) 등록 — BACKWARD 호환 → 성공해야 함
+curl -X POST http://localhost:8081/subjects/advisory.quarantine.triggered.v1-value/versions \
+  -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+  -d "{\"schema\": $(cat services/advisory-service/src/main/avro/quarantine_triggered_v2.avsc | jq -Rs .)}"
+```
+결과 (version id):
+
+**실험 4: 호환성 위반 시도 — 필수 필드 삭제**
+```bash
+# revId 필드 삭제한 스키마 등록 → BACKWARD 위반 → 실패해야 함
+curl -X POST http://localhost:8081/compatibility/subjects/advisory.quarantine.triggered.v1-value/versions/latest \
+  -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+  -d '{"schema": "{\"type\":\"record\",\"name\":\"QuarantineTriggered\",\"namespace\":\"com.bank.loan.advisory.avro\",\"fields\":[{\"name\":\"conclusionCd\",\"type\":\"string\"}]}"}'
+```
+결과 (INCOMPATIBLE 응답 확인):
+
+**학습 결론:**
 
 ---
 
