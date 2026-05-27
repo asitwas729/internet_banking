@@ -6,6 +6,7 @@ import com.bank.ai.agent.RiskLevel;
 import com.bank.ai.agent.SimulationResult;
 import com.bank.ai.llm.policy.InlinePolicyIndex;
 import com.bank.ai.llm.policy.PolicyIndex;
+import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.rag.policy.RagPolicyIndex;
 import com.bank.ai.rule.domain.Track;
 import com.bank.ai.rule.domain.TrackDecision;
@@ -26,7 +27,8 @@ class GroundingValidatorTest {
             "B_V1", new PolicyIndex.PolicyEntry("정책 B", "src"),
             "C_V1", new PolicyIndex.PolicyEntry("정책 C", "src")
     ));
-    private final GroundingValidator validator = new GroundingValidator(POLICY, Optional.empty());
+    private static final AgentMetricsRecorder METRICS = mock(AgentMetricsRecorder.class);
+    private final GroundingValidator validator = new GroundingValidator(POLICY, Optional.empty(), METRICS);
 
     private ReviewReport withCitations(Track track, List<String> citationIds) {
         var cs = citationIds.stream()
@@ -186,14 +188,14 @@ class GroundingValidatorTest {
     void inline_prefix_citation_통과() {
         // "inline:A_V1" → strip prefix → "A_V1" in InlinePolicyIndex
         var r = withCitations(Track.TRACK_1, List.of("inline:A_V1"));
-        assertThat(new GroundingValidator(POLICY, Optional.empty()).validate(r).passed()).isTrue();
+        assertThat(new GroundingValidator(POLICY, Optional.empty(), METRICS).validate(r).passed()).isTrue();
     }
 
     @Test
     void rag_prefix_citation_RagPolicyIndex_통과() {
         var ragIndex = mock(RagPolicyIndex.class);
         when(ragIndex.exists("chunk-001")).thenReturn(true);
-        var v = new GroundingValidator(POLICY, Optional.of(ragIndex));
+        var v = new GroundingValidator(POLICY, Optional.of(ragIndex), METRICS);
 
         var r = withCitations(Track.TRACK_1, List.of("rag:chunk-001"));
         assertThat(v.validate(r).passed()).isTrue();
@@ -203,7 +205,7 @@ class GroundingValidatorTest {
     void mixed_inline_rag_Track2_citations_통과() {
         var ragIndex = mock(RagPolicyIndex.class);
         when(ragIndex.exists("chunk-002")).thenReturn(true);
-        var v = new GroundingValidator(POLICY, Optional.of(ragIndex));
+        var v = new GroundingValidator(POLICY, Optional.of(ragIndex), METRICS);
 
         // Track 2: "inline:A_V1" + "rag:chunk-002" → 2개, 모두 존재
         var r = withCitations(Track.TRACK_2, List.of("inline:A_V1", "rag:chunk-002"));
@@ -213,7 +215,7 @@ class GroundingValidatorTest {
     @Test
     void rag_prefix_RagPolicyIndex_비활성시_실패() {
         // ragPolicyIndex=null → rag: citation 항상 미존재
-        var v = new GroundingValidator(POLICY, Optional.empty());
+        var v = new GroundingValidator(POLICY, Optional.empty(), METRICS);
 
         var r = withCitations(Track.TRACK_1, List.of("rag:chunk-003"));
         var result = v.validate(r);
@@ -225,7 +227,7 @@ class GroundingValidatorTest {
     void rag_chunk_미존재시_실패() {
         var ragIndex = mock(RagPolicyIndex.class);
         when(ragIndex.exists("ghost-chunk")).thenReturn(false);
-        var v = new GroundingValidator(POLICY, Optional.of(ragIndex));
+        var v = new GroundingValidator(POLICY, Optional.of(ragIndex), METRICS);
 
         var r = withCitations(Track.TRACK_1, List.of("rag:ghost-chunk"));
         var result = v.validate(r);

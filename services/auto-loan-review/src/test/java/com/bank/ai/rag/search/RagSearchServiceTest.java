@@ -1,5 +1,6 @@
 package com.bank.ai.rag.search;
 
+import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.rag.embedding.StubEmbeddingClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,13 +22,15 @@ class RagSearchServiceTest {
     private JdbcClient.StatementSpec statementSpec;
     @Mock
     private JdbcClient.MappedQuerySpec<Boolean> boolQuerySpec;
+    @Mock
+    private AgentMetricsRecorder metricsRecorder;
 
     private RagSearchService service;
 
     @BeforeEach
     void setUp() {
         var props = new RagSearchProperties(0.7, 0.5, 5);
-        service = new RagSearchService(jdbcClient, new StubEmbeddingClient(), props);
+        service = new RagSearchService(jdbcClient, new StubEmbeddingClient(), props, metricsRecorder);
     }
 
     @Test
