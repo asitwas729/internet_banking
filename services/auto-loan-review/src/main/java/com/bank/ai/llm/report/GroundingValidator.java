@@ -1,21 +1,28 @@
 package com.bank.ai.llm.report;
 
 import com.bank.ai.agent.AgentOpinion;
-import com.bank.ai.llm.policy.PolicyIndex;
+import com.bank.ai.llm.policy.InlinePolicyIndex;
+import com.bank.ai.rag.policy.RagPolicyIndex;
 import com.bank.ai.rule.domain.Track;
 import com.bank.ai.rule.domain.TrackDecision;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
- * ReviewReport grounding 검증 — plan/llm-pipeline.md §5.4.
+ * ReviewReport grounding 검증 — plan/llm-pipeline.md §5.4, phase-d-rag.md D2-6.
  *
  * <p>LLM 이 산출한 리포트의 citation·riskFactor·strength 가 모두 실제 정책 id 를 참조하는지 검사.
  * Track 2 는 법령·정책 인용 ≥ 2 강제 (감독·소송 대비).
+ *
+ * <p>D2-6: Citation.id prefix 분기 —
+ * {@code rag:} prefix → {@link RagPolicyIndex} (ai.rag.enabled=true 시에만 활성),
+ * {@code inline:} prefix 또는 prefix 없음 → {@link InlinePolicyIndex}.
  *
  * <p>실패 시 호출 측이 {@code TemplateFallback} 로 우회 — LLM 환각 인용 차단.
  *
@@ -24,13 +31,25 @@ import java.util.List;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class GroundingValidator {
+
+    static final String INLINE_PREFIX = "inline:";
+    static final String RAG_PREFIX = "rag:";
 
     /** Track 2 (자동 반려) 가 가져야 할 최소 인용 수. */
     public static final int MIN_CITATIONS_TRACK_2 = 2;
 
-    private final PolicyIndex policyIndex;
+    private final InlinePolicyIndex inlinePolicyIndex;
+
+    @Nullable
+    private final RagPolicyIndex ragPolicyIndex;
+
+    @Autowired
+    public GroundingValidator(InlinePolicyIndex inlinePolicyIndex,
+                               Optional<RagPolicyIndex> ragPolicyIndex) {
+        this.inlinePolicyIndex = inlinePolicyIndex;
+        this.ragPolicyIndex = ragPolicyIndex.orElse(null);
+    }
 
     /**
      * @return 첫 위반 사유 (없으면 빈 Optional). 다중 위반도 첫 1건만 — fallback 단계 reasoning 용.
@@ -45,18 +64,18 @@ public class GroundingValidator {
         }
 
         for (var c : report.citations()) {
-            if (!policyIndex.exists(c.id())) {
+            if (!resolveExists(c.id())) {
                 issues.add("citation id '%s' 미존재".formatted(c.id()));
             }
         }
         for (var r : report.riskFactors()) {
-            if (r.citationId() != null && !policyIndex.exists(r.citationId())) {
+            if (r.citationId() != null && !resolveExists(r.citationId())) {
                 issues.add("riskFactor[%s] citationId '%s' 미존재"
                         .formatted(r.code(), r.citationId()));
             }
         }
         for (var s : report.strengths()) {
-            if (s.citationId() != null && !policyIndex.exists(s.citationId())) {
+            if (s.citationId() != null && !resolveExists(s.citationId())) {
                 issues.add("strength[%s] citationId '%s' 미존재"
                         .formatted(s.code(), s.citationId()));
             }
@@ -67,6 +86,23 @@ public class GroundingValidator {
         }
         log.warn("grounding 검증 실패 track={} issues={}", report.track(), issues);
         return ValidationResult.fail(issues);
+    }
+
+    /**
+     * prefix 기반 PolicyIndex 라우팅.
+     * {@code rag:} → RagPolicyIndex (비활성이면 false),
+     * {@code inline:} 또는 prefix 없음 → InlinePolicyIndex.
+     */
+    private boolean resolveExists(String id) {
+        if (id.startsWith(RAG_PREFIX)) {
+            if (ragPolicyIndex == null) {
+                log.warn("rag: citation 검증 시도이나 RagPolicyIndex 비활성: id={}", id);
+                return false;
+            }
+            return ragPolicyIndex.exists(id.substring(RAG_PREFIX.length()));
+        }
+        String lookupId = id.startsWith(INLINE_PREFIX) ? id.substring(INLINE_PREFIX.length()) : id;
+        return inlinePolicyIndex.exists(lookupId);
     }
 
     /**
