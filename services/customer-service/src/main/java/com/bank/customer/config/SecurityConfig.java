@@ -1,10 +1,5 @@
 package com.bank.customer.config;
 
-import com.bank.common.security.jwt.JwtProvider;
-import com.bank.customer.security.JwtAuthenticationFilter;
-import io.micrometer.core.instrument.MeterRegistry;
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -14,20 +9,14 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+/**
+ * JWT 검증은 api-gateway 에서만 수행한다.
+ * customer-service 는 내부 네트워크에서만 접근 가능하므로 모든 경로를 허용한다.
+ */
 @Configuration
 @EnableWebSecurity
-@RequiredArgsConstructor
 public class SecurityConfig {
-
-    private final JwtProvider jwtProvider;
-    private final MeterRegistry meterRegistry;
-
-    @Bean
-    public JwtAuthenticationFilter jwtAuthenticationFilter() {
-        return new JwtAuthenticationFilter(jwtProvider, meterRegistry);
-    }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -36,21 +25,7 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .formLogin(AbstractHttpConfigurer::disable)
             .httpBasic(AbstractHttpConfigurer::disable)
-            .addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class)
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login").permitAll()
-                .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
-                                 "/v3/api-docs/**").permitAll()
-                .requestMatchers("/actuator/health", "/actuator/info",
-                                 "/actuator/prometheus").permitAll()
-                .anyRequest().authenticated()
-            )
-            .exceptionHandling(ex -> ex
-                .accessDeniedHandler((request, response, e) -> {
-                    meterRegistry.counter("customer.auth.access_denied").increment();
-                    response.sendError(HttpServletResponse.SC_FORBIDDEN);
-                })
-            );
+            .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
 
         return http.build();
     }
