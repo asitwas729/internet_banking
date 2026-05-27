@@ -1,5 +1,6 @@
-// ai-service: 의존성/플러그인은 루트 build.gradle 의 subprojects 블록에서 일괄 관리.
-// ai-service 는 RDB(JPA) 를 사용하지 않으므로 공통에서 들어오는 spring-data-jpa starter 만 제외.
-configurations.implementation {
-    exclude group: 'org.springframework.boot', module: 'spring-boot-starter-data-jpa'
+// ai-service 전용 의존성 (루트 build.gradle subprojects 블록에 추가되지 않는 것)
+dependencies {
+    // 문서 파싱 (PDF·DOCX·HWP)
+    implementation 'org.apache.tika:tika-core:2.9.2'
+    implementation 'org.apache.tika:tika-parsers-standard-package:2.9.2'
 }

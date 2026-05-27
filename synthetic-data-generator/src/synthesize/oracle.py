@@ -13,9 +13,8 @@ LTV_MAX = 0.70
 CREDIT_MIN = 600
 AMOUNT_TO_INCOME_MAX = 3.0  # 신청금액 ≤ 연소득×3
 
-# 편향 주입 대상: 단순/일용/비정규 직업군에 +5%p(절대) 추가 거절 (Layer 4 self-test 용)
-# persona_sampler._applicant_segment 의 precarious 매칭 규칙과 동기화.
-_BIASED_OCC_PATTERN = re.compile(r"단순|일용|일당|비정규")
+# 편향 주입 대상: 단순/일용 직업군에 +5% 추가 거절 (Layer 4 self-test 용)
+_BIASED_OCC_PATTERN = re.compile(r"단순|일용|일당")
 
 
 def _rule_score(row: pd.Series) -> int:
@@ -57,31 +56,19 @@ def label(applications: pd.DataFrame, seed: int = 42, noise_rate: float = 0.07,
         else:
             decisions[i] = rng.choice(["APPROVE", "REJECT"])
 
-    # 편향 주입: 단순/일용/비정규 직업군의 거절률을 절대 +bias_extra_reject(예: +5%p) 만큼 상승
-    # (D2) 기존 구현은 'APPROVE 행의 5%' 만 flip → precarious 는 대부분 이미 REJECT 라
-    #      체감 효과가 0에 가깝거나 표본노이즈로 역전됨. 다음과 같이 수정:
-    #      - 대상 풀: biased_pool 전체 (REJECT 제외하면 표본 부족)
-    #      - 목표 flip 수: int(biased_pool.size * bias_extra_reject)
-    #      - 후보: 현재 REJECT 가 아닌 행. 부족하면 가능한 만큼만 flip(경고 로그).
+    # 편향 주입: 단순/일용 직업군 +5% 추가 거절
     bias_flag = np.zeros(n, dtype=bool)
     if inject_bias:
         occ = applications["occupation"].fillna("")
         biased_pool = occ.str.contains(_BIASED_OCC_PATTERN, regex=True, na=False).to_numpy()
-        pool_size = int(biased_pool.sum())
-        if pool_size > 0:
-            desired_flips = int(round(pool_size * bias_extra_reject))
-            candidate_idx = np.where(biased_pool & (decisions != "REJECT"))[0]
-            if desired_flips > 0 and len(candidate_idx) > 0:
-                k = min(desired_flips, len(candidate_idx))
-                to_flip = rng.choice(candidate_idx, size=k, replace=False)
-                decisions[to_flip] = "REJECT"
-                bias_flag[to_flip] = True
-                if k < desired_flips:
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        "bias injection 부족: 목표 %d 중 %d 만 flip (후보 부족). "
-                        "precarious 표본 크기를 늘릴 것.", desired_flips, k,
-                    )
+        # 그 중 현재 APPROVE 인 행만 대상으로 5% 강제 reject
+        target_idx = np.where(biased_pool & (decisions == "APPROVE"))[0]
+        if len(target_idx) > 0:
+            to_flip = rng.choice(target_idx,
+                                 size=int(len(target_idx) * bias_extra_reject),
+                                 replace=False)
+            decisions[to_flip] = "REJECT"
+            bias_flag[to_flip] = True
 
     # 승인 권장 한도/금리
     suggested_amount = np.where(

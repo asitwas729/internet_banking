@@ -2,13 +2,19 @@ package com.bank.ai;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
-/**
- * ai-service 는 RDB(JPA) 비사용. spring-data-jpa starter 는 build.gradle 에서 제외하고,
- * common 의 JPA 의존 패키지(audit/persistence/code)는 스캔에서 제외 — JpaRepository 클래스가
- * 클래스패스에 없어서 로드 시 NoClassDefFoundError 가 나기 때문. 필요한 건 common.web 뿐.
- */
-@SpringBootApplication(scanBasePackages = {"com.bank.ai", "com.bank.common.web"})
+// JPA·DataSource auto-configure 활성화 (RAG 도입으로 ai-db 연결 필요)
+// @EntityScan / @EnableJpaRepositories: common 의 StatusHistory · BaseEntity 스캔 (loan-service 와 동일 패턴)
+// @EnableScheduling: RAG 정기 인제스트 스케줄러 — 실제 활성은 rag.scheduler.enabled 로 분기
+@SpringBootApplication(scanBasePackages = {"com.bank.ai", "com.bank.common"})
+@EntityScan(basePackages = {"com.bank.ai", "com.bank.common"})
+@EnableJpaRepositories(basePackages = {"com.bank.ai", "com.bank.common"})
+@ConfigurationPropertiesScan("com.bank.ai")
+@EnableScheduling
 public class AiServiceApplication {
 
     public static void main(String[] args) {
