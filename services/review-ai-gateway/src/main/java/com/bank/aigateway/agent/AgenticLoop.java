@@ -41,7 +41,7 @@ public class AgenticLoop {
      * @param systemPrompt  Claude system prompt
      * @param userMessage   초기 user 메시지
      * @param tools         노출할 tool 목록
-     * @param toolExecutor  tool name → 실행 결과 문자열 (실패 시 빈 문자열)
+     * @param toolExecutor  tool name → 실행 결과 문자열 (실패 시 에러 JSON 반환)
      */
     public AgenticLoopResult run(String systemPrompt,
                                  String userMessage,
@@ -105,8 +105,9 @@ public class AgenticLoop {
             String result = executor.apply(call);
             return result != null ? result : "";
         } catch (Exception e) {
-            log.warn("Tool 실행 실패 (무시) — tool={}: {}", call.name(), e.getMessage());
-            return "";
+            log.warn("Tool 실행 실패 — tool={}: {}", call.name(), e.getMessage());
+            return "{\"error\":\"tool_execution_failed\",\"tool\":\"%s\",\"reason\":\"%s\"}"
+                    .formatted(call.name(), e.getMessage() != null ? e.getMessage().replace("\"", "'") : "unknown");
         }
     }
 }

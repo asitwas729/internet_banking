@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -77,10 +78,11 @@ class AgenticLoopTest {
     }
 
     @Test
-    void tool_실행_예외_시_빈_결과로_루프_계속() {
+    void tool_실행_예외_시_에러_JSON으로_LLM에_알리고_루프_계속() {
         ToolCall call = new ToolCall("id-2", "get_reviewer_history", objectMapper.createObjectNode());
+        ArgumentCaptor<ArrayNode> messagesCaptor = ArgumentCaptor.forClass(ArrayNode.class);
 
-        when(llmClient.completeWithTools(any(), any(), any()))
+        when(llmClient.completeWithTools(any(), messagesCaptor.capture(), any()))
                 .thenReturn(toolUseResponse(call, 50, 30))
                 .thenReturn(endTurnResponse("예외 후 계속된 의견", 100, 70));
 
@@ -90,6 +92,12 @@ class AgenticLoopTest {
 
         assertThat(result.text()).isEqualTo("예외 후 계속된 의견");
         assertThat(result.turnsUsed()).isEqualTo(2);
+
+        // 두 번째 LLM 호출 시 전달된 messages에 에러 JSON이 포함돼야 한다
+        ArrayNode secondCallMessages = messagesCaptor.getAllValues().get(1);
+        String messagesJson = secondCallMessages.toString();
+        assertThat(messagesJson).contains("tool_execution_failed");
+        assertThat(messagesJson).contains("get_reviewer_history");
     }
 
     @Test
