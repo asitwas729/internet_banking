@@ -1,11 +1,14 @@
 package com.bank.ai.rag.search;
 
+import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.rag.embedding.EmbeddingClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -31,6 +34,7 @@ public class RagSearchService {
     private final JdbcClient jdbcClient;
     private final EmbeddingClient embeddingClient;
     private final RagSearchProperties props;
+    private final AgentMetricsRecorder metricsRecorder;
 
     /**
      * 하이브리드 검색.
@@ -49,8 +53,9 @@ public class RagSearchService {
         String metaJson = metaFilter != null && !metaFilter.isEmpty()
                 ? toJsonb(metaFilter) : null;
 
+        Instant start = Instant.now();
         try {
-            return jdbcClient.sql(buildSql(metaJson != null))
+            List<Chunk> results = jdbcClient.sql(buildSql(metaJson != null))
                     .param("corpus", corpus)
                     .param("queryVec", vecLiteral)
                     .param("queryTsq", toTsQuery(query))
@@ -62,8 +67,16 @@ public class RagSearchService {
                             : Collections.emptyMap())
                     .query(this::mapChunk)
                     .list();
+            metricsRecorder.recordRagSearchLatency(corpus, Duration.between(start, Instant.now()));
+            metricsRecorder.recordRagChunkCount(corpus, results.size());
+            if (results.isEmpty()) {
+                metricsRecorder.recordRagSearchMiss(corpus);
+            }
+            return results;
         } catch (Exception e) {
             log.error("RagSearchService: 검색 실패 corpus={} query={}", corpus, query, e);
+            metricsRecorder.recordRagSearchLatency(corpus, Duration.between(start, Instant.now()));
+            metricsRecorder.recordRagSearchMiss(corpus);
             return List.of();
         }
     }

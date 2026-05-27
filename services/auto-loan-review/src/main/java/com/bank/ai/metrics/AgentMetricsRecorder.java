@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -16,22 +17,26 @@ import java.time.Duration;
 /**
  * AI 파이프라인 Micrometer 메트릭 중앙 기록기 — phase-b-operational.md §B2.
  *
- * <p>메트릭 목록 (14종):
+ * <p>메트릭 목록 (18종):
  * <ul>
- *   <li>{@code ai.agent.runs.total}         Counter   track, outcome</li>
- *   <li>{@code ai.agent.latency.seconds}     Timer     track, outcome</li>
- *   <li>{@code ai.agent.tool.calls.total}    Counter   tool_name, status</li>
- *   <li>{@code ai.agent.llm.calls.total}     Counter   model, outcome</li>
- *   <li>{@code ai.agent.llm.latency.seconds} Timer     model</li>
- *   <li>{@code ai.agent.tokens.input.total}  Counter   model</li>
- *   <li>{@code ai.agent.tokens.output.total} Counter   model</li>
- *   <li>{@code ai.agent.cost.usd.total}      Counter   model</li>
- *   <li>{@code ai.agent.rpm.remaining}       Gauge     — (LlmRequestRateMeter 등록)</li>
- *   <li>{@code ai.agent.rpd.remaining}       Gauge     — (LlmRequestRateMeter 등록)</li>
- *   <li>{@code ai.agent.disagreement.total}  Counter   track</li>
- *   <li>{@code ai.agent.fallback.total}      Counter   reason</li>
- *   <li>{@code ai.agent.hard.fail.total}     Counter   reason</li>
- *   <li>{@code ai.audit.log.size.bytes}      DistributionSummary  —</li>
+ *   <li>{@code ai.agent.runs.total}              Counter             track, outcome</li>
+ *   <li>{@code ai.agent.latency.seconds}          Timer               track, outcome</li>
+ *   <li>{@code ai.agent.tool.calls.total}         Counter             tool_name, status</li>
+ *   <li>{@code ai.agent.llm.calls.total}          Counter             model, outcome</li>
+ *   <li>{@code ai.agent.llm.latency.seconds}      Timer               model</li>
+ *   <li>{@code ai.agent.tokens.input.total}       Counter             model</li>
+ *   <li>{@code ai.agent.tokens.output.total}      Counter             model</li>
+ *   <li>{@code ai.agent.cost.usd.total}           Counter             model</li>
+ *   <li>{@code ai.agent.rpm.remaining}            Gauge               — (LlmRequestRateMeter 등록)</li>
+ *   <li>{@code ai.agent.rpd.remaining}            Gauge               — (LlmRequestRateMeter 등록)</li>
+ *   <li>{@code ai.agent.disagreement.total}       Counter             track</li>
+ *   <li>{@code ai.agent.fallback.total}           Counter             reason</li>
+ *   <li>{@code ai.agent.hard.fail.total}          Counter             reason</li>
+ *   <li>{@code ai.audit.log.size.bytes}           DistributionSummary —</li>
+ *   <li>{@code rag.search.latency.seconds}        Timer               corpus</li>
+ *   <li>{@code rag.search.miss.total}             Counter             corpus</li>
+ *   <li>{@code rag.chunk.count}                   DistributionSummary corpus</li>
+ *   <li>{@code rag.citation.count.per.report}     DistributionSummary track</li>
  * </ul>
  *
  * <p>rpm/rpd Gauge 는 {@code LlmRequestRateMeter#registerGauges()} 에서 이미 등록 — 여기선 제외.
@@ -159,5 +164,39 @@ public class AgentMetricsRecorder {
                 .baseUnit("bytes")
                 .register(registry)
                 .record(bytes);
+    }
+
+    // ── RAG 검색 ──────────────────────────────────────────────────────────────
+
+    /** RAG 검색 지연 기록 (corpus 별). */
+    public void recordRagSearchLatency(String corpus, Duration latency) {
+        Timer.builder("rag.search.latency.seconds")
+                .tag(AgentMetricsTags.CORPUS, corpus)
+                .register(registry)
+                .record(latency);
+    }
+
+    /** RAG 검색 결과 없음 (miss) 기록 (corpus 별). */
+    public void recordRagSearchMiss(String corpus) {
+        Counter.builder("rag.search.miss.total")
+                .tag(AgentMetricsTags.CORPUS, corpus)
+                .register(registry)
+                .increment();
+    }
+
+    /** RAG 검색 반환 청크 수 기록 (corpus 별). */
+    public void recordRagChunkCount(String corpus, int count) {
+        DistributionSummary.builder("rag.chunk.count")
+                .tag(AgentMetricsTags.CORPUS, corpus)
+                .register(registry)
+                .record(count);
+    }
+
+    /** 리포트 1건당 RAG citation 수 기록 (track 별). */
+    public void recordRagCitationCount(Track track, int count) {
+        DistributionSummary.builder("rag.citation.count.per.report")
+                .tag(AgentMetricsTags.TRACK, track.name())
+                .register(registry)
+                .record(count);
     }
 }

@@ -2,6 +2,7 @@ package com.bank.ai.llm.report;
 
 import com.bank.ai.agent.AgentOpinion;
 import com.bank.ai.llm.policy.InlinePolicyIndex;
+import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.rag.policy.RagPolicyIndex;
 import com.bank.ai.rule.domain.Track;
 import com.bank.ai.rule.domain.TrackDecision;
@@ -44,11 +45,15 @@ public class GroundingValidator {
     @Nullable
     private final RagPolicyIndex ragPolicyIndex;
 
+    private final AgentMetricsRecorder metricsRecorder;
+
     @Autowired
     public GroundingValidator(InlinePolicyIndex inlinePolicyIndex,
-                               Optional<RagPolicyIndex> ragPolicyIndex) {
+                               Optional<RagPolicyIndex> ragPolicyIndex,
+                               AgentMetricsRecorder metricsRecorder) {
         this.inlinePolicyIndex = inlinePolicyIndex;
         this.ragPolicyIndex = ragPolicyIndex.orElse(null);
+        this.metricsRecorder = metricsRecorder;
     }
 
     /**
@@ -80,6 +85,11 @@ public class GroundingValidator {
                         .formatted(s.code(), s.citationId()));
             }
         }
+
+        long ragCitationCount = report.citations().stream()
+                .filter(c -> c.id().startsWith(RAG_PREFIX))
+                .count();
+        metricsRecorder.recordRagCitationCount(report.track(), (int) ragCitationCount);
 
         if (issues.isEmpty()) {
             return ValidationResult.ok();

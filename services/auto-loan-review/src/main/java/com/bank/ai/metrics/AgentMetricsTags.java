@@ -13,6 +13,7 @@ public final class AgentMetricsTags {
     public static final String MODEL     = "model";
     public static final String REASON    = "reason";
     public static final String STATUS    = "status";
+    public static final String CORPUS    = "corpus";
 
     private AgentMetricsTags() {}
 }
