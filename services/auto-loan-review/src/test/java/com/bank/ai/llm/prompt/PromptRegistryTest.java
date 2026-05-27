@@ -64,8 +64,8 @@ class PromptRegistryTest {
     }
 
     @Test
-    void 총_4개_프롬프트_등록() {
-        assertThat(registry.all()).hasSize(4);
+    void 총_8개_프롬프트_등록() {
+        assertThat(registry.all()).hasSize(8);
     }
 
     @Test
@@ -88,6 +88,53 @@ class PromptRegistryTest {
         assertThat(registry.all()).containsKey("review_report_track1:1");
         assertThat(registry.all()).containsKey("review_report_track2:1");
         assertThat(registry.all()).containsKey("review_report_track3:1");
+    }
+
+    // ── v2 프롬프트 TC ────────────────────────────────────────────────────
+
+    @Test
+    void review_report_track1_v2_로드_성공_rag_지침_포함() {
+        var p = registry.get("review_report_track1", 2);
+
+        assertThat(p.id()).isEqualTo("review_report_track1");
+        assertThat(p.version()).isEqualTo(2);
+        assertThat(p.system()).contains("TRACK_1");
+        assertThat(p.system()).contains("rag_policy_context");
+        assertThat(p.changelog()).hasSize(2);
+    }
+
+    @Test
+    void review_report_track2_v2_로드_성공_rag_지침_포함() {
+        var p = registry.get("review_report_track2", 2);
+
+        assertThat(p.id()).isEqualTo("review_report_track2");
+        assertThat(p.version()).isEqualTo(2);
+        assertThat(p.system()).contains("TRACK_2");
+        assertThat(p.system()).contains("rag_policy_context");
+        assertThat(p.system()).contains("citations");
+        assertThat(p.maxTokens()).isEqualTo(768);
+    }
+
+    @Test
+    void review_report_track3_v2_로드_성공_rag_지침_포함() {
+        var p = registry.get("review_report_track3", 2);
+
+        assertThat(p.id()).isEqualTo("review_report_track3");
+        assertThat(p.version()).isEqualTo(2);
+        assertThat(p.system()).contains("TRACK_3");
+        assertThat(p.system()).contains("rag_policy_context");
+    }
+
+    @Test
+    void rejection_reason_draft_v2_로드_성공_rag_지침_포함() {
+        var p = registry.get("rejection_reason_draft", 2);
+
+        assertThat(p.id()).isEqualTo("rejection_reason_draft");
+        assertThat(p.version()).isEqualTo(2);
+        assertThat(p.system()).contains("TRACK_2");
+        assertThat(p.system()).contains("rag_policy_context");
+        assertThat(p.system()).contains("citations");
+        assertThat(p.maxTokens()).isEqualTo(768);
     }
 
     @Test
