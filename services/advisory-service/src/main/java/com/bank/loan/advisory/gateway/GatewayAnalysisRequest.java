@@ -7,7 +7,6 @@ public record GatewayAnalysisRequest(
         Long revId,
         Long reviewerId,
         String reviewOpinionText,
-        List<GatewaySignalSummary> signals
         List<GatewaySignalSummary> signals,
         List<GatewayRagChunk> ragChunks
 ) {
