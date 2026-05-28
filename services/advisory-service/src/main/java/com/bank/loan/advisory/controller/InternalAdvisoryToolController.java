@@ -2,20 +2,28 @@ package com.bank.loan.advisory.controller;
 
 import com.bank.common.web.ApiResponse;
 import com.bank.loan.advisory.dto.CohortStatsResponse;
+import com.bank.loan.advisory.dto.DocumentRegisterRequest;
+import com.bank.loan.advisory.dto.DocumentRegisterResponse;
 import com.bank.loan.advisory.dto.PolicyCitationResponse;
 import com.bank.loan.advisory.dto.ReviewerHistoryResponse;
 import com.bank.loan.advisory.dto.SimilarCaseResponse;
 import com.bank.loan.advisory.kafka.AdvisoryKafkaQuotaManager;
 import com.bank.loan.advisory.kafka.AdvisorySkewSimulator;
+import com.bank.loan.advisory.rag.CaseIndexingService;
+import com.bank.loan.advisory.rag.DocumentIngestionService;
 import com.bank.loan.advisory.service.AdvisoryToolQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
@@ -28,6 +36,8 @@ import java.util.concurrent.ExecutionException;
 public class InternalAdvisoryToolController {
 
     private final AdvisoryToolQueryService service;
+    private final DocumentIngestionService  documentIngestionService;
+    private final CaseIndexingService       caseIndexingService;
     private final AdvisorySkewSimulator skewSimulator;
     private final AdvisoryKafkaQuotaManager quotaManager;
 
@@ -75,6 +85,25 @@ public class InternalAdvisoryToolController {
             @RequestParam String dimension,
             @RequestParam String value) {
         return ApiResponse.ok(service.queryCohortStats(dimension, value));
+    }
+
+    // ---- RAG 데이터 관리 ----
+
+    @Operation(summary = "정책문서 등록",
+            description = "content 를 800자 청크로 분할·임베딩·적재한다. seed_hmda_rag.py 가 이 경로를 호출한다.")
+    @PostMapping("/documents")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<DocumentRegisterResponse> registerDocument(
+            @Valid @RequestBody DocumentRegisterRequest req) {
+        return ApiResponse.ok(documentIngestionService.register(req, null));
+    }
+
+    @Operation(summary = "사례 인덱스 일괄 백필",
+            description = "COMPLETED 상태 전체 LoanReview 를 advisory_case_index 에 임베딩·적재한다. 최초 구동 또는 모델 교체 시 1회 실행.")
+    @PostMapping("/rag/backfill")
+    public ApiResponse<Map<String, Integer>> backfillCaseIndex() {
+        int count = caseIndexingService.indexAll(null);
+        return ApiResponse.ok(Map.of("indexedCount", count));
     }
 
     // ---- L5 Quota / Throttling 실험 엔드포인트 ----
