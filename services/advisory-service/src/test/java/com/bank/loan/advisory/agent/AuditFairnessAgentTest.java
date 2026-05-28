@@ -342,10 +342,10 @@ class AuditFairnessAgentTest {
     }
 
     private GatewayAnalysisResponse biasResponse(String conclusion, double confidence) {
-        return new GatewayAnalysisResponse("BIAS_DETECTION", conclusion, "편향 의심 의견", confidence, 100, 80);
+        return new GatewayAnalysisResponse("BIAS_DETECTION", conclusion, "편향 의심 의견", confidence, 100, 80, List.of());
     }
 
     private GatewayAnalysisResponse complianceResponse(String conclusion, double confidence) {
-        return new GatewayAnalysisResponse("COMPLIANCE_VERIFICATION", conclusion, "규정 위반 의심", confidence, 120, 90);
+        return new GatewayAnalysisResponse("COMPLIANCE_VERIFICATION", conclusion, "규정 위반 의심", confidence, 120, 90, List.of());
     }
 }

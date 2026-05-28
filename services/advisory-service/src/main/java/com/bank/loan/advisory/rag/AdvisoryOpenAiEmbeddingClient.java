@@ -41,13 +41,15 @@ public class AdvisoryOpenAiEmbeddingClient implements EmbeddingClient {
                                          AdvisoryRagProperties props) {
         AdvisoryRagProperties.OpenAi openai = props.openai();
 
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        if (openai.connectTimeoutMs() > 0) factory.setConnectTimeout(openai.connectTimeoutMs());
-        if (openai.readTimeoutMs()    > 0) factory.setReadTimeout(openai.readTimeoutMs());
-
-        RestClient.Builder b = builder
-                .requestFactory(factory)
-                .baseUrl(openai.baseUrl());
+        RestClient.Builder b;
+        if (openai.connectTimeoutMs() > 0 || openai.readTimeoutMs() > 0) {
+            SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+            if (openai.connectTimeoutMs() > 0) factory.setConnectTimeout(openai.connectTimeoutMs());
+            if (openai.readTimeoutMs()    > 0) factory.setReadTimeout(openai.readTimeoutMs());
+            b = builder.requestFactory(factory).baseUrl(openai.baseUrl());
+        } else {
+            b = builder.baseUrl(openai.baseUrl());
+        }
 
         if (openai.apiKey() != null && !openai.apiKey().isBlank()) {
             b.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + openai.apiKey());
