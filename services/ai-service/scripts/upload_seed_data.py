@@ -39,6 +39,12 @@ import time
 from datetime import date
 from pathlib import Path
 
+# Windows cp949 터미널에서 한글/특수문자 인코딩 오류 방지
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf-8-sig"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr.encoding and sys.stderr.encoding.lower() not in ("utf-8", "utf-8-sig"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import requests
 
 # ── Tesseract 경로 자동 설정 (Windows 기본 설치 위치 폴백) ──────────────────
@@ -119,7 +125,46 @@ def _extract_pdf(file_path: Path) -> str:
                 pages.append(text)
     result = "\n\n".join(pages).strip()
     if not result:
-        raise RuntimeError(f"PDF 텍스트 추출 결과 빔 [{file_path.name}] — 스캔 이미지 PDF 일 가능성")
+        # 텍스트 레이어 없음 → 스캔 이미지 PDF: pdf2image + OCR 시도
+        return _extract_pdf_ocr(file_path)
+    return result
+
+
+# poppler 설치 경로 (winget 기본 위치)
+_POPPLER_PATH = r"C:\Users\asitw\AppData\Local\Microsoft\WinGet\Packages\oschwartz10612.Poppler_Microsoft.Winget.Source_8wekyb3d8bbwe\poppler-25.07.0\Library\bin"
+
+
+def _extract_pdf_ocr(file_path: Path) -> str:
+    """스캔 이미지 PDF: pdf2image 로 페이지를 이미지 변환 후 pytesseract OCR."""
+    try:
+        from pdf2image import convert_from_path
+    except ImportError:
+        raise RuntimeError(
+            f"스캔 PDF OCR 실패 [{file_path.name}]: pdf2image 미설치 — pip install pdf2image"
+        )
+    try:
+        from PIL import Image
+        import pytesseract
+    except ImportError:
+        raise RuntimeError(
+            f"스캔 PDF OCR 실패 [{file_path.name}]: Pillow·pytesseract 미설치"
+        )
+
+    poppler_path = _POPPLER_PATH if os.path.isdir(_POPPLER_PATH) else None
+    images = convert_from_path(str(file_path), dpi=150, poppler_path=poppler_path)
+    texts = []
+    for img in images:
+        if img.width < 1000:
+            scale = 1000 / img.width
+            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
+        text = pytesseract.image_to_string(img, lang="kor+eng").strip()
+        if text:
+            texts.append(text)
+    result = "\n\n".join(texts).strip()
+    if not result:
+        raise RuntimeError(
+            f"스캔 PDF OCR 결과 빔 [{file_path.name}] — Tesseract 한국어 팩(kor) 설치 여부 확인"
+        )
     return result
 
 
@@ -209,7 +254,7 @@ def load_meta(file_path: Path) -> dict:
 def build_payload(file_path: Path, folder_name: str) -> dict:
     """파일과 메타 정보로 DocumentRegisterRequest payload 구성."""
     meta = load_meta(file_path)
-    doc_cd  = meta.get("doc_cd",  file_path.stem.upper())
+    doc_cd  = meta.get("doc_cd",  file_path.stem.upper())[:50]   # API 최대 50자
     content = extract_text(file_path)
 
     return {
@@ -324,19 +369,19 @@ def main():
         try:
             payload = build_payload(file_path, folder_name)
         except Exception as e:
-            print(f"  ❌ {rel}  →  추출 실패: {e}")
+            print(f"  [FAIL] {rel}  ->  추출 실패: {e}")
             counts["error"] += 1
             continue
 
         if args.dry_run:
-            print(f"  [DRY-RUN] {rel}  →  doc_cd={payload['docCd']}"
+            print(f"  [DRY-RUN] {rel}  ->  doc_cd={payload['docCd']}"
                   f"  category={payload['docCategoryCd']}  chars={len(payload['content'])}")
             counts["created"] += 1
             continue
 
         result = register_document(args.host, payload, args.force)
-        icon = {"created": "✅", "skipped": "⏭ ", "forced": "🔄"}.get(result.split(":")[0], "❌")
-        print(f"  {icon} {rel}  →  {result}")
+        icon = {"created": "[OK]", "skipped": "[SKIP]", "forced": "[FORCE]"}.get(result.split(":")[0], "[FAIL]")
+        print(f"  {icon} {rel}  ->  {result}")
 
         key = result.split(":")[0] if result.startswith("error") else result
         counts[key] = counts.get(key, 0) + 1
