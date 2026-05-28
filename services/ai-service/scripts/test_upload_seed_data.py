@@ -8,7 +8,7 @@ usage:
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -79,24 +79,180 @@ class TestBuildPayload:
         assert payload["content"] == body
 
 
+# ── extract_text: PDF ─────────────────────────────────────────────────────────
+
+class TestExtractPdf:
+    def test_pdf_텍스트_추출(self, tmp_path):
+        pdf_file = tmp_path / "TEST.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4 dummy")  # 더미 바이트 — mock 으로 대체
+
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "DSR 규정 본문"
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [mock_page]
+        mock_pdf.__enter__ = lambda s: mock_pdf
+        mock_pdf.__exit__ = MagicMock(return_value=False)
+
+        with patch("pdfplumber.open", return_value=mock_pdf):
+            text = usd._extract_pdf(pdf_file)
+
+        assert text == "DSR 규정 본문"
+
+    def test_pdf_모든_페이지_합산(self, tmp_path):
+        pdf_file = tmp_path / "TEST.pdf"
+        pdf_file.write_bytes(b"%PDF")
+
+        pages = [MagicMock(), MagicMock()]
+        pages[0].extract_text.return_value = "1페이지"
+        pages[1].extract_text.return_value = "2페이지"
+        mock_pdf = MagicMock()
+        mock_pdf.pages = pages
+        mock_pdf.__enter__ = lambda s: mock_pdf
+        mock_pdf.__exit__ = MagicMock(return_value=False)
+
+        with patch("pdfplumber.open", return_value=mock_pdf):
+            text = usd._extract_pdf(pdf_file)
+
+        assert "1페이지" in text
+        assert "2페이지" in text
+
+    def test_pdf_텍스트_없으면_RuntimeError(self, tmp_path):
+        pdf_file = tmp_path / "SCAN.pdf"
+        pdf_file.write_bytes(b"%PDF")
+
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = ""
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [mock_page]
+        mock_pdf.__enter__ = lambda s: mock_pdf
+        mock_pdf.__exit__ = MagicMock(return_value=False)
+
+        with patch("pdfplumber.open", return_value=mock_pdf):
+            with pytest.raises(RuntimeError, match="스캔 이미지"):
+                usd._extract_pdf(pdf_file)
+
+    def test_pdfplumber_미설치_시_RuntimeError(self, tmp_path):
+        pdf_file = tmp_path / "TEST.pdf"
+        pdf_file.write_bytes(b"%PDF")
+        with patch.dict("sys.modules", {"pdfplumber": None}):
+            with pytest.raises(RuntimeError, match="pdfplumber"):
+                usd._extract_pdf(pdf_file)
+
+
+# ── extract_text: HWP ─────────────────────────────────────────────────────────
+
+class TestExtractHwp:
+    def test_hwp5txt_커맨드_성공(self, tmp_path):
+        hwp_file = tmp_path / "TEST.hwp"
+        hwp_file.write_bytes(b"\xd0\xcf\x11\xe0")  # OLE 시그니처
+
+        mock_result = MagicMock(returncode=0, stdout="여신심사 매뉴얼 본문\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            text = usd._extract_hwp(hwp_file)
+
+        assert text == "여신심사 매뉴얼 본문"
+        assert mock_run.call_args[0][0][0] == "hwp5txt"
+
+    def test_hwp5txt_없으면_python_모듈_폴백(self, tmp_path):
+        hwp_file = tmp_path / "TEST.hwp"
+        hwp_file.write_bytes(b"\xd0\xcf\x11\xe0")
+
+        import sys
+        fail = MagicMock(side_effect=FileNotFoundError)
+        success = MagicMock(returncode=0, stdout="폴백 본문\n")
+        with patch("subprocess.run", side_effect=[FileNotFoundError(), success]):
+            text = usd._extract_hwp(hwp_file)
+
+        assert text == "폴백 본문"
+
+    def test_hwp_모두_실패_시_RuntimeError(self, tmp_path):
+        hwp_file = tmp_path / "TEST.hwp"
+        hwp_file.write_bytes(b"\xd0\xcf\x11\xe0")
+
+        fail = MagicMock(returncode=1, stdout="", stderr="오류 메시지")
+        with patch("subprocess.run", side_effect=[FileNotFoundError(), fail]):
+            with pytest.raises(RuntimeError, match="hwp5"):
+                usd._extract_hwp(hwp_file)
+
+
+# ── extract_text: PNG (OCR) ───────────────────────────────────────────────────
+
+class TestExtractImageOcr:
+    def test_png_ocr_텍스트_반환(self, tmp_path):
+        png_file = tmp_path / "금리표.png"
+        png_file.write_bytes(b"\x89PNG\r\n\x1a\n")  # PNG 시그니처 더미
+
+        mock_img = MagicMock()
+        mock_img.width = 1200
+        mock_img.height = 800
+
+        with patch("PIL.Image.open", return_value=mock_img), \
+             patch("pytesseract.image_to_string", return_value="신용대출금리 3.5%") as mock_ocr:
+            text = usd._extract_image_ocr(png_file)
+
+        assert text == "신용대출금리 3.5%"
+        mock_ocr.assert_called_once_with(mock_img, lang="kor+eng")
+
+    def test_저해상도_이미지_업스케일_후_ocr(self, tmp_path):
+        png_file = tmp_path / "small.png"
+        png_file.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        mock_img = MagicMock()
+        mock_img.width = 400   # < 1000 → 업스케일 트리거
+        mock_img.height = 300
+        mock_img.resize.return_value = mock_img  # resize 후 같은 객체 반환
+
+        with patch("PIL.Image.open", return_value=mock_img), \
+             patch("pytesseract.image_to_string", return_value="업스케일 텍스트"):
+            text = usd._extract_image_ocr(png_file)
+
+        mock_img.resize.assert_called_once()  # 업스케일 호출됨
+        assert text == "업스케일 텍스트"
+
+    def test_ocr_결과_빔_RuntimeError(self, tmp_path):
+        png_file = tmp_path / "blank.png"
+        png_file.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        mock_img = MagicMock()
+        mock_img.width = 1200
+
+        with patch("PIL.Image.open", return_value=mock_img), \
+             patch("pytesseract.image_to_string", return_value="   "):
+            with pytest.raises(RuntimeError, match="OCR 결과 빔"):
+                usd._extract_image_ocr(png_file)
+
+    def test_pillow_미설치_시_RuntimeError(self, tmp_path):
+        png_file = tmp_path / "TEST.png"
+        png_file.write_bytes(b"\x89PNG")
+        with patch.dict("sys.modules", {"PIL": None, "PIL.Image": None, "pytesseract": None}):
+            with pytest.raises((RuntimeError, ImportError)):
+                usd._extract_image_ocr(png_file)
+
+
 # ── collect_files ─────────────────────────────────────────────────────────────
 
 class TestCollectFiles:
-    def test_지원_확장자만_수집(self, seed_root, monkeypatch):
+    def test_지원_확장자_모두_수집(self, seed_root, monkeypatch):
         monkeypatch.setattr(usd, "SEED_ROOT", seed_root)
-        make_md(seed_root / "law", "LAW_BANKING_ACT")
-        (seed_root / "law" / "LAW_BANKING_ACT.pdf").write_bytes(b"%PDF")  # 무시
-        (seed_root / "law" / ".hidden.md").write_text("숨김")               # 무시
+        folder = seed_root / "law"
+        make_md(folder, "LAW_MD")
+        (folder / "LAW_PDF.pdf").write_bytes(b"%PDF")
+        (folder / "LAW_HWP.hwp").write_bytes(b"\xd0\xcf")
+        (folder / "LAW_PNG.png").write_bytes(b"\x89PNG")
+        (folder / ".hidden.md").write_text("숨김")
+        (folder / "LAW_PDF.meta.yml").write_text("title: test")  # meta.yml 제외
 
         files = usd.collect_files()
         names = [f.name for f, _ in files]
-        assert "LAW_BANKING_ACT.md" in names
-        assert "LAW_BANKING_ACT.pdf" not in names
+        assert "LAW_MD.md" in names
+        assert "LAW_PDF.pdf" in names
+        assert "LAW_HWP.hwp" in names
+        assert "LAW_PNG.png" in names
         assert ".hidden.md" not in names
+        assert "LAW_PDF.meta.yml" not in names
 
     def test_빈_폴더는_건너뜀(self, seed_root, monkeypatch):
         monkeypatch.setattr(usd, "SEED_ROOT", seed_root)
-        # seed_root 의 모든 폴더가 비어 있음
         files = usd.collect_files()
         assert files == []
 
@@ -132,8 +288,8 @@ class TestRegisterDocument:
 
     def test_409_충돌_force_true_재등록_성공(self):
         post_responses = [
-            MagicMock(status_code=409),   # 첫 등록 → 충돌
-            MagicMock(status_code=201),   # 재등록 → 성공
+            MagicMock(status_code=409),
+            MagicMock(status_code=201),
         ]
         put_resp = MagicMock(status_code=200)
         with patch("requests.post", side_effect=post_responses), \
@@ -149,6 +305,40 @@ class TestRegisterDocument:
         assert result.startswith("error:500")
 
 
+# ── 추출 실패 내성 ────────────────────────────────────────────────────────────
+
+class TestExtractionFailureTolerance:
+    def test_추출_실패_시_해당_파일_skip_나머지_계속(self, seed_root, monkeypatch, capsys):
+        """extract_text 에서 예외가 나도 다음 파일은 계속 처리된다."""
+        monkeypatch.setattr(usd, "SEED_ROOT", seed_root)
+        folder = seed_root / "law"
+        make_md(folder, "LAW_OK", "정상 본문")
+        (folder / "LAW_BAD.pdf").write_bytes(b"%PDF")  # 추출 실패 유도
+
+        mock_post = MagicMock(return_value=MagicMock(status_code=201))
+
+        def fake_extract(path):
+            if path.suffix == ".pdf":
+                raise RuntimeError("pdfplumber 미설치")
+            return path.read_text(encoding="utf-8")
+
+        with patch.object(usd, "extract_text", side_effect=fake_extract), \
+             patch("requests.post", mock_post):
+            # main() 대신 직접 루프 실행
+            files = usd.collect_files()
+            error_count = 0
+            ok_count = 0
+            for file_path, folder_name in files:
+                try:
+                    payload = usd.build_payload(file_path, folder_name)
+                    ok_count += 1
+                except Exception:
+                    error_count += 1
+
+        assert error_count == 1   # PDF 1건 실패
+        assert ok_count == 1      # MD 1건 성공
+
+
 # ── dry-run 흐름 ─────────────────────────────────────────────────────────────
 
 class TestDryRun:
@@ -157,11 +347,9 @@ class TestDryRun:
         make_md(seed_root / "law", "LAW_BANKING_ACT", "은행법 본문")
 
         with patch("requests.post") as mock_post:
-            # argparse 우회: main() 직접 호출 대신 로직만 검증
             files = usd.collect_files()
             for file_path, folder_name in files:
                 payload = usd.build_payload(file_path, folder_name)
-                # dry-run 분기: API 호출 없이 출력만
                 print(f"[DRY-RUN] {file_path.name} → {payload['docCd']}")
 
             mock_post.assert_not_called()
