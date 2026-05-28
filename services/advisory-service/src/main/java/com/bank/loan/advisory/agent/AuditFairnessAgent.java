@@ -122,6 +122,7 @@ public class AuditFairnessAgent {
             GatewayAnalysisResponse resp = gatewayClient.analyze(new GatewayAnalysisRequest(
                     analysisType, revId, reviewerId, maskedOpinion, signals, ragChunks));
 
+            String citedJson = serializeChunkIds(resp.citedChunkIds());
             opinionRepo.save(AiAuditOpinion.builder()
                     .advrId(advrId)
                     .revId(revId)
@@ -132,6 +133,7 @@ public class AuditFairnessAgent {
                     .confidenceScore(resp.confidenceScore())
                     .inputTokens(resp.inputTokens())
                     .outputTokens(resp.outputTokens())
+                    .citedChunkIds(citedJson)
                     .generatedAt(OffsetDateTime.now())
                     .build());
 
@@ -189,6 +191,16 @@ public class AuditFairnessAgent {
                         item.docCd() + " §" + item.sectionPath(),
                         truncate(item.chunkText(), maxChars)))
                 .toList();
+    }
+
+    private String serializeChunkIds(java.util.List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return null;
+        try {
+            return objectMapper.writeValueAsString(ids);
+        } catch (Exception e) {
+            log.warn("citedChunkIds 직렬화 실패 (무시): {}", e.getMessage());
+            return null;
+        }
     }
 
     private static String truncate(String text, int maxChars) {
