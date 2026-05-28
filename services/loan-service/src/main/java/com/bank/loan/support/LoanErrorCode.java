@@ -129,7 +129,11 @@ public enum LoanErrorCode implements ErrorCode {
     LOAN_184(HttpStatus.UNPROCESSABLE_ENTITY, "보증보험이 등록된 계약은 활성 ISSUED 보증보험이 필요합니다. (drawdown 사전조건)"),
 
     LOAN_190(HttpStatus.NOT_FOUND,            "알림 outbox 를 찾을 수 없습니다."),
-    LOAN_191(HttpStatus.UNPROCESSABLE_ENTITY, "현재 상태에서는 재전송할 수 없습니다. (FAILED/DEAD 필요)");
+    LOAN_191(HttpStatus.UNPROCESSABLE_ENTITY, "현재 상태에서는 재전송할 수 없습니다. (FAILED/DEAD 필요)"),
+
+    // RAG (200-209)
+    LOAN_200(HttpStatus.SERVICE_UNAVAILABLE,  "임베딩 API 호출에 실패했습니다. 잠시 후 재시도하세요."),
+    LOAN_201(HttpStatus.BAD_GATEWAY,          "임베딩 API 응답이 유효하지 않습니다. (차원 불일치 또는 빈 응답)");
 
     private final HttpStatus status;
     private final String message;
