@@ -41,6 +41,22 @@ from pathlib import Path
 
 import requests
 
+# ── Tesseract 경로 자동 설정 (Windows 기본 설치 위치 폴백) ──────────────────
+_TESSERACT_DEFAULT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+_TESSDATA_USER = os.path.join(os.environ.get("APPDATA", ""), "tessdata")
+
+if os.name == "nt":
+    # TESSDATA_PREFIX: 사용자 tessdata 폴더 우선 (한국어 팩 포함)
+    if not os.environ.get("TESSDATA_PREFIX") and os.path.isdir(_TESSDATA_USER):
+        os.environ["TESSDATA_PREFIX"] = _TESSDATA_USER
+    # tesseract_cmd: PATH 에 없으면 기본 설치 경로 사용
+    try:
+        import pytesseract as _pt
+        if not Path(_pt.pytesseract.tesseract_cmd).exists() and Path(_TESSERACT_DEFAULT).exists():
+            _pt.pytesseract.tesseract_cmd = _TESSERACT_DEFAULT
+    except ImportError:
+        pass
+
 try:
     import yaml
     YAML_AVAILABLE = True
