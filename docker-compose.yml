@@ -36,7 +36,7 @@ services:
       retries: 5
 
   loan-db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: ib-loan-db
     environment:
       POSTGRES_DB: ${LOAN_DB_NAME:-loan_db}
