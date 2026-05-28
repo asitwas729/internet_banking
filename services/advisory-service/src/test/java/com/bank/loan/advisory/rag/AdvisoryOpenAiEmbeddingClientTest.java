@@ -95,7 +95,7 @@ class AdvisoryOpenAiEmbeddingClientTest {
     }
 
     @Test
-    void 응답_차원_불일치_LOAN_201() {
+    void 응답_차원_불일치_LOAN_211() {
         server.expect(requestTo(BASE_URL + "/v1/embeddings"))
                 .andRespond(withSuccess("""
                         {"object":"list","model":"x","data":[
@@ -105,11 +105,11 @@ class AdvisoryOpenAiEmbeddingClientTest {
         assertThatThrownBy(() -> client.embed("청크"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
-                        .isEqualTo(LoanErrorCode.LOAN_201));
+                        .isEqualTo(LoanErrorCode.LOAN_211));
     }
 
     @Test
-    void 응답_비어있음_LOAN_201() {
+    void 응답_비어있음_LOAN_211() {
         server.expect(requestTo(BASE_URL + "/v1/embeddings"))
                 .andRespond(withSuccess("""
                         {"object":"list","model":"x","data":[]}
@@ -118,30 +118,30 @@ class AdvisoryOpenAiEmbeddingClientTest {
         assertThatThrownBy(() -> client.embed("청크"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
-                        .isEqualTo(LoanErrorCode.LOAN_201));
+                        .isEqualTo(LoanErrorCode.LOAN_211));
     }
 
     @Test
-    void 외부_API_4xx_즉시_실패_LOAN_201() {
+    void 외부_API_4xx_즉시_실패_LOAN_211() {
         server.expect(ExpectedCount.once(), requestTo(BASE_URL + "/v1/embeddings"))
                 .andRespond(withBadRequest());
 
         assertThatThrownBy(() -> client.embed("청크"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
-                        .isEqualTo(LoanErrorCode.LOAN_201));
+                        .isEqualTo(LoanErrorCode.LOAN_211));
         server.verify();
     }
 
     @Test
-    void 외부_API_5xx_3회_후_LOAN_200() {
+    void 외부_API_5xx_3회_후_LOAN_210() {
         server.expect(ExpectedCount.times(3), requestTo(BASE_URL + "/v1/embeddings"))
                 .andRespond(withServerError());
 
         assertThatThrownBy(() -> client.embed("청크"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
-                        .isEqualTo(LoanErrorCode.LOAN_200));
+                        .isEqualTo(LoanErrorCode.LOAN_210));
         server.verify();
     }
 

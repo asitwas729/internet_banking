@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
@@ -77,8 +76,6 @@ public class InternalAdvisoryToolController {
             @RequestParam String value) {
         return ApiResponse.ok(service.queryCohortStats(dimension, value));
     }
-
-    // ---- RAG 데이터 관리 — POST /documents, GET /index/cases 는 InternalAdvisoryRagController 로 이전 ----
 
     // ---- L5 Quota / Throttling 실험 엔드포인트 ----
 

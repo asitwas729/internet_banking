@@ -76,11 +76,11 @@ public class AdvisoryOpenAiEmbeddingClient implements EmbeddingClient {
     public float[] embed(String text) {
         EmbedResponse response = callWithRetry(new EmbedRequest(model, List.of(text), dimension));
         if (response.data() == null || response.data().isEmpty()) {
-            throw new BusinessException(LoanErrorCode.LOAN_201, "openai 응답 본문 비어 있음");
+            throw new BusinessException(LoanErrorCode.LOAN_211, "openai 응답 본문 비어 있음");
         }
         List<Double> values = response.data().get(0).embedding();
         if (values.size() != dimension) {
-            throw new BusinessException(LoanErrorCode.LOAN_201,
+            throw new BusinessException(LoanErrorCode.LOAN_211,
                     "openai 응답 차원 불일치: expected=" + dimension + " actual=" + values.size());
         }
         float[] v = new float[dimension];
@@ -98,13 +98,13 @@ public class AdvisoryOpenAiEmbeddingClient implements EmbeddingClient {
                         .body(request)
                         .retrieve()
                         .body(EmbedResponse.class);
-                if (body == null) throw new BusinessException(LoanErrorCode.LOAN_201, "openai 응답 null");
+                if (body == null) throw new BusinessException(LoanErrorCode.LOAN_211, "openai 응답 null");
                 return body;
             } catch (BusinessException e) {
                 throw e;
             } catch (HttpClientErrorException e) {
                 // 4xx — 재시도 무의미
-                throw new BusinessException(LoanErrorCode.LOAN_201,
+                throw new BusinessException(LoanErrorCode.LOAN_211,
                         "openai 4xx " + e.getStatusCode() + " — 요청 형식 점검 필요");
             } catch (HttpServerErrorException | ResourceAccessException e) {
                 lastEx = e;
@@ -112,7 +112,7 @@ public class AdvisoryOpenAiEmbeddingClient implements EmbeddingClient {
                 if (attempt < maxAttempts) sleepBackoff(attempt);
             }
         }
-        throw new BusinessException(LoanErrorCode.LOAN_200,
+        throw new BusinessException(LoanErrorCode.LOAN_210,
                 "openai 임베딩 " + maxAttempts + "회 재시도 실패: " + lastEx.getMessage());
     }
 
@@ -122,7 +122,7 @@ public class AdvisoryOpenAiEmbeddingClient implements EmbeddingClient {
             Thread.sleep(delay);
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
-            throw new BusinessException(LoanErrorCode.LOAN_200, "재시도 대기 중 인터럽트");
+            throw new BusinessException(LoanErrorCode.LOAN_210, "재시도 대기 중 인터럽트");
         }
     }
 

@@ -131,9 +131,22 @@ public enum LoanErrorCode implements ErrorCode {
     LOAN_190(HttpStatus.NOT_FOUND,            "알림 outbox 를 찾을 수 없습니다."),
     LOAN_191(HttpStatus.UNPROCESSABLE_ENTITY, "현재 상태에서는 재전송할 수 없습니다. (FAILED/DEAD 필요)"),
 
-    // RAG (200-209)
-    LOAN_200(HttpStatus.SERVICE_UNAVAILABLE,  "임베딩 API 호출에 실패했습니다. 잠시 후 재시도하세요."),
-    LOAN_201(HttpStatus.BAD_GATEWAY,          "임베딩 API 응답이 유효하지 않습니다. (차원 불일치 또는 빈 응답)");
+    // 편향 검증·승인자 단계 (192–199)
+    LOAN_192(HttpStatus.UNPROCESSABLE_ENTITY, "본심사가 편향 검증(BIAS_REVIEWING) 상태가 아닙니다."),
+    LOAN_193(HttpStatus.UNPROCESSABLE_ENTITY, "편향 검증 리포트가 아직 생성되지 않았습니다. 리포트 생성 후 다시 시도하세요."),
+    LOAN_194(HttpStatus.UNPROCESSABLE_ENTITY, "편향 검증 결과가 BLOCKED 입니다. 결정을 정정하거나 상급자 우회 승인을 받으세요."),
+    LOAN_195(HttpStatus.UNPROCESSABLE_ENTITY, "본심사가 승인자 대기(PENDING_APPROVER) 상태가 아닙니다."),
+    LOAN_196(HttpStatus.UNPROCESSABLE_ENTITY, "승인자와 심사원이 동일합니다. 4-eye 원칙에 따라 다른 사람이 승인해야 합니다."),
+    LOAN_197(HttpStatus.BAD_REQUEST,          "결정 변경(override) 시 사유 코드(overrideReasonCd)가 필요합니다."),
+    LOAN_198(HttpStatus.BAD_REQUEST,          "OVERRIDE_APPROVED 시 승인 금액·금리·기간이 필요합니다."),
+    LOAN_199(HttpStatus.UNPROCESSABLE_ENTITY, "본심사가 편향 검증(BIAS_REVIEWING) 상태가 아니어서 편향 우회 승인이 불가합니다."),
+
+    // 4-eye 원칙 위반 (200)
+    LOAN_200(HttpStatus.FORBIDDEN, "심사원 본인이 자신의 편향을 우회 승인할 수 없습니다. 다른 상급자가 승인해야 합니다."),
+
+    // RAG (210-219)
+    LOAN_210(HttpStatus.SERVICE_UNAVAILABLE,  "임베딩 API 호출에 실패했습니다. 잠시 후 재시도하세요."),
+    LOAN_211(HttpStatus.BAD_GATEWAY,          "임베딩 API 응답이 유효하지 않습니다. (차원 불일치 또는 빈 응답)");
 
     private final HttpStatus status;
     private final String message;
