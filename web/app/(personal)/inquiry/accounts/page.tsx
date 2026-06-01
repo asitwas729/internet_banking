@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { Account, formatNumber } from '@/lib/mock-data'
 import InquirySidebar from '@/components/inquiry/InquirySidebar'
 import { fetchDepositAccountViewModels, getCurrentDepositCustomerId } from '@/lib/deposit-api'
+import type { DepositViewAccount } from '@/lib/deposit-api'
 
 const ACCOUNT_TABS = ['예금', '펀드', '신탁/ISA', '대출', '외화/골드', '보험/공제', '퇴직연금', '전체계좌']
 
@@ -79,18 +80,15 @@ function SectionHeader({ dotColor, label, count, balance, open, onToggle, showOr
   )
 }
 
-function normalizeAccountType(account: Account): Account['type'] {
-  if (['입출금', '적금', '예금', '청약'].includes(account.type)) {
-    return account.type
-  }
-
+function normalizeAccountType(account: { type: string; name: string }): string {
+  if (['입출금', '적금', '예금', '청약'].includes(account.type)) return account.type
   if (account.name.includes('청약')) return '청약'
   if (account.name.includes('적금')) return '적금'
   if (account.name.includes('통장')) return '입출금'
   return '예금'
 }
 
-function canTransferFrom(account: Account) {
+function canTransferFrom(account: { type: string; name: string }) {
   return normalizeAccountType(account) === '입출금'
 }
 
@@ -108,25 +106,13 @@ export default function AccountsPage() {
   const [allFxOpen, setAllFxOpen] = useState(true)
   const [allInsOpen, setAllInsOpen] = useState(true)
   const [allRetireOpen, setAllRetireOpen] = useState(true)
-  const [joinedAccounts, setJoinedAccounts] = useState<Account[]>([])
+  const [joinedAccounts, setJoinedAccounts] = useState<DepositViewAccount[]>([])
   const [accountOverrides, setAccountOverrides] = useState<Record<string, number>>({})
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem('user')
       if (stored) setUserName(JSON.parse(stored).name)
-    } catch {}
-    let fallbackAccounts: Account[] = []
-    try {
-      const raw = localStorage.getItem('joinedAccounts')
-      if (raw) {
-        const parsed = (JSON.parse(raw) as Account[]).map(account => ({
-          ...account,
-          type: normalizeAccountType(account),
-        }))
-        fallbackAccounts = parsed
-        localStorage.setItem('joinedAccounts', JSON.stringify(parsed))
-      }
     } catch {}
     try {
       const raw = localStorage.getItem('accountOverrides')
@@ -137,11 +123,9 @@ export default function AccountsPage() {
     async function loadDepositAccounts() {
       try {
         const apiAccounts = await fetchDepositAccountViewModels(getCurrentDepositCustomerId())
-        if (!cancelled) {
-          setJoinedAccounts(apiAccounts.length > 0 ? apiAccounts : fallbackAccounts)
-        }
+        if (!cancelled) setJoinedAccounts(apiAccounts)
       } catch {
-        if (!cancelled) setJoinedAccounts(fallbackAccounts)
+        if (!cancelled) setJoinedAccounts([])
       }
     }
 

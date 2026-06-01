@@ -73,7 +73,6 @@ export type DepositViewAccount = Account & {
   apiAccountId?: number
   contractId?: number
   accountStatus?: string
-  savingType?: string
 }
 
 export type DepositRecommendProduct = {
@@ -345,8 +344,9 @@ export type DepositTransaction = {
 }
 
 export async function fetchTransactions(params: { customerId?: string; accountId?: number }): Promise<DepositTransaction[]> {
-  const { data } = await depositApi.get<{ content: DepositTransaction[] } | DepositTransaction[]>('/transactions', { params })
-  return Array.isArray(data) ? data : (data as { content: DepositTransaction[] }).content ?? []
+  const { data } = await depositApi.get<DepositTransaction[] | { content?: DepositTransaction[] }>('/transactions', { params })
+  if (Array.isArray(data)) return data
+  return Array.isArray(data.content) ? data.content : []
 }
 
 export async function fetchTransaction(transactionId: number): Promise<DepositTransaction> {
@@ -378,7 +378,6 @@ export async function fetchDepositAccountViewModels(customerId: string): Promise
         apiAccountId: account.accountId,
         contractId: account.contractId,
         accountStatus: account.accountStatus,
-        savingType: account.savingType,
         number: account.accountNumber,
         type: accountTypeLabel(account, product),
         name: account.accountAlias || product?.productName || fallbackName(account),
