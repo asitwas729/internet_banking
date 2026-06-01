@@ -310,6 +310,7 @@ export default function DepositJoinPage() {
       })
       localStorage.removeItem('joinedAccounts')
       router.push('/inquiry/accounts')
+      router.refresh()
     } catch {
       try {
         saveFallbackAccount()
