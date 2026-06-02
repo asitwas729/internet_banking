@@ -6,10 +6,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * FairnessReportService 통합 테스트 — H2 + 2040년 3월 데이터.
@@ -35,6 +37,9 @@ class FairnessReportServiceTest {
 
     @Autowired
     private FairnessReportService fairnessReportService;
+
+    @Autowired
+    private FairnessReportRepository fairnessReportRepo;
 
     @Autowired
     private NamedParameterJdbcTemplate jdbc;
@@ -71,6 +76,21 @@ class FairnessReportServiceTest {
             .orElseThrow(() -> new AssertionError("60plus 그룹 없음"));
         assertThat(sixtyPlus.approvalRate()).isEqualTo(0.0);
         assertThat(sixtyPlus.flagged()).isTrue();
+    }
+
+    @Test
+    void fairnessRepo_upsert_idempotentOnDuplicateMonthAndGroup() {
+        LocalDate month = LocalDate.of(2041, 1, 1);
+        FairnessReport first  = new FairnessReport(month, "age_band:30s", 0.8, 50, 0.6, 0.2,  true);
+        FairnessReport second = new FairnessReport(month, "age_band:30s", 0.9, 60, 0.65, 0.25, true);
+
+        fairnessReportRepo.insert(first);
+        fairnessReportRepo.insert(second);
+
+        List<FairnessReport> flagged = fairnessReportRepo.findFlaggedByMonth(month);
+        assertThat(flagged).hasSize(1);
+        assertThat(flagged.get(0).approvalRate()).isCloseTo(0.9, within(1e-9));
+        assertThat(flagged.get(0).sampleCount()).isEqualTo(60);
     }
 
     private void insertAuditLog(long revId, int age, String riskLevel, String date) {

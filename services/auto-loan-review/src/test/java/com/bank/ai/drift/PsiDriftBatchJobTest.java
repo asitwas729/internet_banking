@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * PsiDriftBatchJob 통합 테스트 — H2 + 2040년 데이터.
@@ -44,6 +45,9 @@ class PsiDriftBatchJobTest {
 
     @Autowired
     private NamedParameterJdbcTemplate jdbc;
+
+    @Autowired
+    private PsiDriftResultRepository resultRepo;
 
     @Test
     void psiDriftJob_insertsResult_whenDataAndBaselineExist() throws Exception {
@@ -109,5 +113,25 @@ class PsiDriftBatchJobTest {
             Map.of("fn", "creditScore", "mv", "v1"),
             Integer.class);
         assertThat(count).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    void resultRepo_upsert_idempotentOnDuplicateCalcWeek() {
+        LocalDate calcWeek = LocalDate.of(2041, 1, 6);
+        PsiDriftReport first  = new PsiDriftReport("creditScore", 0.05, PsiStatus.STABLE,   100, "v1");
+        PsiDriftReport second = new PsiDriftReport("creditScore", 0.25, PsiStatus.CRITICAL, 200, "v1");
+
+        resultRepo.insert(first,  calcWeek);
+        resultRepo.insert(second, calcWeek);
+
+        int count = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM psi_drift_result WHERE feature_name='creditScore' AND calc_week=:w AND model_version='v1'",
+            Map.of("w", calcWeek), Integer.class);
+        assertThat(count).isEqualTo(1);
+
+        PsiDriftReport saved = resultRepo.findLatest("creditScore", "v1").orElseThrow();
+        assertThat(saved.psiValue()).isCloseTo(0.25, within(1e-9));
+        assertThat(saved.status()).isEqualTo(PsiStatus.CRITICAL);
+        assertThat(saved.sampleCount()).isEqualTo(200);
     }
 }
