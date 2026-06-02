@@ -19,6 +19,7 @@ import java.util.Map;
 public class FairnessReportService {
 
     private final FairnessReportRepository repository;
+    private final DriftAlertService alertService;
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final DriftProperties props;
@@ -66,6 +67,7 @@ public class FairnessReportService {
                 from, entry.getKey(), approvalRate,
                 outcomes.size(), overallRate, gap, flagged);
             repository.insert(report);
+            if (report.flagged()) alertService.alertFairness(report);
             reports.add(report);
         }
         return reports;

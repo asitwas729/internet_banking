@@ -18,6 +18,16 @@ public class DriftAlertService {
     private final MeterRegistry registry;
     private final ConcurrentHashMap<String, AtomicReference<Double>> psiGauges = new ConcurrentHashMap<>();
 
+    /** flagged 공정성 리포트 → 카운터 + WARN 로그. */
+    public void alertFairness(FairnessReport report) {
+        Counter.builder("ai.fairness.flagged.total")
+            .tag("group", report.groupKey())
+            .register(registry)
+            .increment();
+        log.warn("[Fairness] 임계치 초과 group={} approvalRate={} gap={}",
+            report.groupKey(), report.approvalRate(), report.rateGap());
+    }
+
     /** CRITICAL PSI → 메트릭 카운터 + WARN 로그. PSI 값은 feature별 gauge에 항상 갱신. */
     public void alert(PsiDriftReport report) {
         if (report.status() == PsiStatus.CRITICAL) {
