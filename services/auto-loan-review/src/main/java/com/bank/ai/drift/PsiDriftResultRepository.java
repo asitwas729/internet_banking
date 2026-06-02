@@ -1,7 +1,6 @@
 package com.bank.ai.drift;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -26,21 +25,16 @@ public class PsiDriftResultRepository {
             .addValue("sampleCount", report.sampleCount())
             .addValue("modelVersion", report.modelVersion());
 
-        String insertSql = """
+        String sql = """
             INSERT INTO psi_drift_result
                 (feature_name, calc_week, psi_value, status, sample_count, model_version)
             VALUES (:featureName, :calcWeek, :psiValue, :status, :sampleCount, :modelVersion)
+            ON CONFLICT (feature_name, calc_week, model_version)
+            DO UPDATE SET psi_value    = EXCLUDED.psi_value,
+                          status       = EXCLUDED.status,
+                          sample_count = EXCLUDED.sample_count
             """;
-        try {
-            jdbc.update(insertSql, params);
-        } catch (DuplicateKeyException e) {
-            String updateSql = """
-                UPDATE psi_drift_result
-                SET psi_value=:psiValue, status=:status, sample_count=:sampleCount
-                WHERE feature_name=:featureName AND calc_week=:calcWeek AND model_version=:modelVersion
-                """;
-            jdbc.update(updateSql, params);
-        }
+        jdbc.update(sql, params);
     }
 
     public Optional<PsiDriftReport> findLatest(String featureName, String modelVersion) {

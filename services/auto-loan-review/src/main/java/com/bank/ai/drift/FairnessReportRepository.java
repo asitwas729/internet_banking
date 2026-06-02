@@ -1,7 +1,6 @@
 package com.bank.ai.drift;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -26,22 +25,18 @@ public class FairnessReportRepository {
             .addValue("rateGap", r.rateGap())
             .addValue("flagged", r.flagged());
 
-        String insertSql = """
+        String sql = """
             INSERT INTO fairness_report
                 (report_month, group_key, approval_rate, sample_count, overall_rate, rate_gap, flagged)
             VALUES (:reportMonth, :groupKey, :approvalRate, :sampleCount, :overallRate, :rateGap, :flagged)
+            ON CONFLICT (report_month, group_key)
+            DO UPDATE SET approval_rate = EXCLUDED.approval_rate,
+                          sample_count  = EXCLUDED.sample_count,
+                          overall_rate  = EXCLUDED.overall_rate,
+                          rate_gap      = EXCLUDED.rate_gap,
+                          flagged       = EXCLUDED.flagged
             """;
-        try {
-            jdbc.update(insertSql, params);
-        } catch (DuplicateKeyException e) {
-            String updateSql = """
-                UPDATE fairness_report
-                SET approval_rate=:approvalRate, sample_count=:sampleCount,
-                    overall_rate=:overallRate, rate_gap=:rateGap, flagged=:flagged
-                WHERE report_month=:reportMonth AND group_key=:groupKey
-                """;
-            jdbc.update(updateSql, params);
-        }
+        jdbc.update(sql, params);
     }
 
     public List<FairnessReport> findFlaggedByMonth(LocalDate reportMonth) {
