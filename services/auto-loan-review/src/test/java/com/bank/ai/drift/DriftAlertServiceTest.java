@@ -50,7 +50,23 @@ class DriftAlertServiceTest {
         assertThat(counter).isNull();
     }
 
-    // ── TC3: 2회 alert → gauge가 최신값을 반영하고 NaN이 아님 ─────────────
+    // ── TC3: flagged 공정성 리포트 → ai.fairness.flagged.total 카운터 +1 ──
+    @Test
+    void alertFairness_flaggedReport_incrementsCounter() {
+        FairnessReport report = new FairnessReport(
+            java.time.LocalDate.of(2041, 1, 1), "age_band:60plus",
+            0.2, 10, 0.6, -0.4, true);
+
+        alertService.alertFairness(report);
+
+        Counter counter = registry.find("ai.fairness.flagged.total")
+            .tag("group", "age_band:60plus")
+            .counter();
+        assertThat(counter).isNotNull();
+        assertThat(counter.count()).isEqualTo(1.0);
+    }
+
+    // ── TC5: 2회 alert → gauge가 최신값을 반영하고 NaN이 아님 ─────────────
     @Test
     void alert_twiceSameFeature_gaugeReflectsLatestValue() {
         PsiDriftReport first  = new PsiDriftReport("creditScore", 0.05, PsiStatus.STABLE,   100, "v1");
