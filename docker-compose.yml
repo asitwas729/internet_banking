@@ -391,6 +391,7 @@ volumes:
   master-db-data:
   ai-db-data:
   redis-data:
+  kafka-data:
   prometheus-data:
   grafana-data:
   loki-data:
