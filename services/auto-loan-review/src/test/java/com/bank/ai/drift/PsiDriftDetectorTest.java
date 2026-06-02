@@ -19,7 +19,7 @@ class PsiDriftDetectorTest {
 
     @BeforeEach
     void setUp() {
-        DriftProperties props = new DriftProperties(true, "v1", 0.10, 0.20, 0.05, 6);
+        DriftProperties props = new DriftProperties(true, "v1", 0.10, 0.20, 0.05, 6, "0 0 2 * * MON");
         detector = new PsiDriftDetector(props);
     }
 
