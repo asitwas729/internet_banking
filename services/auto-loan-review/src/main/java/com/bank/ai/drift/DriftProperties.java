@@ -10,5 +10,6 @@ public record DriftProperties(
     @DefaultValue("0.10") double psiWarningThreshold,
     @DefaultValue("0.20") double psiCriticalThreshold,
     @DefaultValue("0.05") double fairnessGapThreshold,
-    @DefaultValue("6") int bucketCount
+    @DefaultValue("6") int bucketCount,
+    @DefaultValue("0 0 2 * * MON") String psiCron
 ) {}
