@@ -55,7 +55,9 @@ public class PsiDriftBatchJob implements Tasklet {
             return RepeatStatus.FINISHED;
         }
 
-        processPsiForFeature("creditScore", snapshots, calcWeek);
+        for (String feature : props.psiFeatures()) {
+            processPsiForFeature(feature, snapshots, calcWeek);
+        }
         return RepeatStatus.FINISHED;
     }
 
