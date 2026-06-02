@@ -26,6 +26,10 @@ export type ChatbotFeatureExecuteRequest = {
   compare_product_ids?: number[]
   staff_id?: string
   chatbot_consultation_id?: number
+  amount?: number
+  period?: number
+  product_type?: string
+  purpose?: string
 }
 
 export type ChatbotFeatureExecuteResponse = {
@@ -130,6 +134,27 @@ export async function getChatMessages(chatConsultationId: number): Promise<ChatM
   const { data } = await consultationApi.get<ChatMessage[]>(
     `/chat/consultations/${chatConsultationId}/messages`,
   )
+  return data
+}
+
+export type TransferResult = {
+  status: string
+  message: string
+  transaction_id: number | null
+  balance_after: number | null
+}
+
+export async function executeChatbotTransfer(payload: {
+  customer_no: string
+  from_account_id: number
+  to_account_number: string
+  amount: number
+  memo?: string
+}): Promise<TransferResult> {
+  const { data } = await consultationApi.post<TransferResult>('/chatbot/transfer', {
+    ...payload,
+    memo: payload.memo ?? '이체',
+  })
   return data
 }
 

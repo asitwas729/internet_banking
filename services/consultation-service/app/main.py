@@ -1,16 +1,30 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
+load_dotenv()  # .env → os.environ 주입 (_setup_phoenix 등 os.getenv 사용 전에 실행)
+
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import Base, engine, get_db
 from app.kafka import KafkaEventConsumer, KafkaEventPublisher
+from app.metrics import (
+    chatbot_active_sessions,
+    chatbot_handoff_total,
+    chatbot_message_total,
+    chatbot_satisfaction_score,
+    chatbot_session_ended_total,
+    chatbot_session_total,
+)
 from app.llm import LlmAdapter, LlmHandoffAdapter
 from app.schemas import (
     AgentConnectRequest,
@@ -23,6 +37,8 @@ from app.schemas import (
     ChatbotMessageResponse,
     ChatbotStartRequest,
     ChatbotStartResponse,
+    ChatbotTransferRequest,
+    ChatbotTransferResponse,
     ChatConsultationResponse,
     ChatEndRequest,
     ChatMessageHistoryResponse,
@@ -41,9 +57,74 @@ from app.services import (
 
 logger = logging.getLogger(__name__)
 
+
+def _setup_file_logging() -> None:
+    """파일 로그 핸들러 설정. LOG_DIR 환경변수로 경로 지정 가능."""
+    log_dir = os.getenv("LOG_DIR", "C:/logs/internet-banking")
+    log_file = os.path.join(log_dir, "consultation-service.log")
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        handler = logging.FileHandler(log_file, encoding="utf-8")
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(threadName)s] %(levelname)-5s %(name)s - %(message)s"
+        ))
+        logging.getLogger().addHandler(handler)
+    except Exception as e:
+        logging.getLogger(__name__).warning("[logging] 파일 핸들러 설정 실패: %s", e)
+
+
+_setup_file_logging()
+
+
+def _setup_phoenix() -> None:
+    """Phoenix OTel 계측 초기화. PHOENIX_ENABLED=true 일 때만 활성화."""
+    if os.getenv("PHOENIX_ENABLED", "false").lower() != "true":
+        return
+    try:
+        from phoenix.otel import register
+        from openinference.instrumentation.openai import OpenAIInstrumentor
+
+        endpoint = os.getenv("PHOENIX_HTTP_ENDPOINT", "http://localhost:6006/v1/traces")
+        tracer_provider = register(
+            project_name="consultation-service",
+            endpoint=endpoint,
+            set_global_tracer_provider=True,
+        )
+        OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+        logger.info("[Phoenix] OTel 계측 활성화 → %s (project: consultation-service)", endpoint)
+    except ImportError:
+        logger.warning("[Phoenix] 패키지 미설치 — pip install arize-phoenix-otel openinference-instrumentation-openai")
+
+
+_setup_phoenix()
+
 # settings, static_dir 은 설정값이므로 모듈 수준에 유지
 settings = get_settings()
 static_dir = Path(__file__).resolve().parents[1] / "static"
+
+
+def _setup_langfuse() -> None:
+    """Langfuse LLM 추적 초기화. CONSULTATION_LANGFUSE_ENABLED=true 일 때만 활성화.
+
+    키는 CONSULTATION_LANGFUSE_* 를 우선 사용하고, 없으면 LANGFUSE_* 를 그대로 사용한다.
+    (Langfuse SDK 자체도 LANGFUSE_* 를 직접 읽으므로 이미 설정된 경우 추가 주입 불필요)
+    """
+    if not settings.langfuse_enabled:
+        return
+    secret = settings.langfuse_secret_key or os.getenv("LANGFUSE_SECRET_KEY", "")
+    public = settings.langfuse_public_key or os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    host   = settings.langfuse_host if settings.langfuse_host != "http://localhost:3001" \
+             else os.getenv("LANGFUSE_HOST", settings.langfuse_host)
+    if not secret or not public:
+        logger.warning("[Langfuse] secret/public 키 미설정 — 추적 비활성화")
+        return
+    os.environ["LANGFUSE_SECRET_KEY"] = secret
+    os.environ["LANGFUSE_PUBLIC_KEY"] = public
+    os.environ["LANGFUSE_HOST"] = host
+    logger.info("[Langfuse] LLM 추적 활성화 → %s", host)
+
+
+_setup_langfuse()
 
 
 async def _handle_contract_created(payload: dict, rag: ProductRagEngine | None) -> None:
@@ -193,6 +274,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
+_origins = [
+    o.strip()
+    for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:3000,http://localhost:3001",
+    ).split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+Instrumentator(excluded_handlers=["/metrics", "/health"]).instrument(app).expose(app)
+
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -287,7 +385,10 @@ async def start_chatbot(
     #       현재는 body 의 customer_no 를 그대로 사용하므로 IDOR 취약점 존재.
     #       ex) Depends(require_customer_matches(request.customer_no))
     try:
-        return await service.start(request.customer_no, request.entry_screen, request.app_version)
+        response = await service.start(request.customer_no, request.entry_screen, request.app_version)
+        chatbot_session_total.labels(entry_screen=request.entry_screen or "UNKNOWN").inc()
+        chatbot_active_sessions.inc()
+        return response
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -299,13 +400,25 @@ async def send_chatbot_message(
     service: ChatbotService = Depends(get_chatbot_service),
 ) -> ChatbotMessageResponse:
     try:
-        return await service.handle_message(
+        response = await service.handle_message(
             chatbot_consultation_id,
             request.message,
             request.button_value,
         )
+        chatbot_message_total.labels(process_method=response.process_method).inc()
+        if response.agent_transfer_required:
+            chatbot_handoff_total.inc()
+        return response
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/chatbot/transfer", response_model=ChatbotTransferResponse)
+def chatbot_transfer(
+    request: ChatbotTransferRequest,
+    service: ChatbotService = Depends(get_chatbot_service),
+) -> ChatbotTransferResponse:
+    return service.execute_transfer(request)
 
 
 # ── 상담사 채팅 ───────────────────────────────────────────────────────────────
@@ -418,6 +531,10 @@ async def end_chat(
 ) -> ChatConsultationResponse:
     try:
         chat = await service.end_chat(chat_consultation_id, request.satisfaction_score)
+        chatbot_active_sessions.dec()
+        chatbot_session_ended_total.inc()
+        if request.satisfaction_score is not None:
+            chatbot_satisfaction_score.observe(request.satisfaction_score)
         return _to_chat_response(chat)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

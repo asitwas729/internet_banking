@@ -6,6 +6,7 @@ import com.bank.deposit.domain.enums.*;
 import com.bank.deposit.exception.BusinessException;
 import com.bank.deposit.repository.AccountRepository;
 import com.bank.deposit.repository.TransactionRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -13,8 +14,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,7 +28,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
-import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("TransactionService")
@@ -34,6 +38,13 @@ class TransactionServiceTest {
 
     @Mock private TransactionRepository transactionRepository;
     @Mock private AccountRepository accountRepository;
+    @Mock private Clock clock;
+
+    @BeforeEach
+    void setUpClock() {
+        org.mockito.Mockito.lenient().when(clock.instant()).thenReturn(Instant.parse("2026-01-01T00:00:00Z"));
+        org.mockito.Mockito.lenient().when(clock.getZone()).thenReturn(ZoneId.of("Asia/Seoul"));
+    }
 
     @Nested
     @DisplayName("입금")
@@ -108,10 +119,9 @@ class TransactionServiceTest {
         void transfer() {
             Account source = activeAccount(BigDecimal.valueOf(1_000_000));
             given(accountRepository.findById(1L)).willReturn(Optional.of(source));
-            given(accountRepository.findById(2L)).willReturn(Optional.empty()); // 외부 계좌 없음
             given(transactionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
 
-            Transaction result = transactionService.transfer(1L, 2L, "001-1234-5678",
+            Transaction result = transactionService.transfer(1L, null, "001-1234-5678",
                     BigDecimal.valueOf(300_000), TransferType.EXTERNAL,
                     "001", "국민은행", "홍길동", TransactionChannel.INTERNET, "이체");
 
@@ -133,7 +143,15 @@ class TransactionServiceTest {
         @DisplayName("내부 계좌 이체 시 상대 계좌 입금 거래도 생성한다")
         void transferToInternalAccountCreatesInboundTransaction() {
             Account source = activeAccount(BigDecimal.valueOf(1_000_000));
-            Account target = activeAccount(BigDecimal.valueOf(200_000));
+            Account target = Account.builder()
+                    .accountNumber("ACC-002")
+                    .customerId("CUST-002")
+                    .contractId(2L)
+                    .accountType(ProductType.DEPOSIT)
+                    .accountPassword("5678")
+                    .openedAt("20260101")
+                    .balance(BigDecimal.valueOf(200_000))
+                    .build();
             given(accountRepository.findById(1L)).willReturn(Optional.of(source));
             given(accountRepository.findById(2L)).willReturn(Optional.of(target));
             given(transactionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));

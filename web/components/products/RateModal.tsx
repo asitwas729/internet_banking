@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 
@@ -26,7 +26,7 @@ const YEARS = ['2026', '2025', '2024']
 const MONTHS = ['01','02','03','04','05','06','07','08','09','10','11','12']
 const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'))
 
-export default function RateModal({ productName, rates, rateDate, onClose }: Props) {
+export default function RateModal({ productName, rates, onClose }: Props) {
   const [subTab, setSubTab] = useState('전체상품')
   const [rateType, setRateType] = useState('기본이율')
   const [year, setYear] = useState('2026')
@@ -174,7 +174,7 @@ export default function RateModal({ productName, rates, rateDate, onClose }: Pro
         <div className="flex items-center justify-between px-5 py-2 border-t border-kb-border bg-[#fafafa]">
           <span className="text-[12px] text-kb-text-muted flex items-center gap-1">
             <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4"><path d="M10 2L3 7v6c0 4 2.5 7 7 8 4.5-1 7-4 7-8V7L10 2z" fill="#5BC9A8"/></svg>
-            AX풀뱅크
+            AXful Bank
           </span>
           <button onClick={onClose}
             className="border border-kb-border px-6 py-1.5 text-[13px] text-kb-text-body hover:bg-kb-beige-light">

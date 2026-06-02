@@ -44,7 +44,7 @@ export default function ConsultModal({ onClose }: Props) {
             <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2">
               <path d="M10 2L3 7v6c0 4 2.5 7 7 8 4.5-1 7-4 7-8V7L10 2z" fill="#1A1A1A" stroke="none" />
             </svg>
-            AX풀뱅크
+            AXful Bank
           </span>
         </div>
 
@@ -86,7 +86,7 @@ export default function ConsultModal({ onClose }: Props) {
             <div className="pt-3">
               <button
                 className="border border-kb-border px-5 py-2 text-[12px] text-kb-text-body hover:bg-kb-beige transition-colors"
-                onClick={() => window.open('http://localhost:8090/chat', '_blank')}
+                onClick={() => window.open('http://localhost:8087/chat', '_blank')}
               >
                 채팅상담하기
               </button>

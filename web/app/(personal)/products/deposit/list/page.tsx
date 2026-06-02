@@ -1,9 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import CartModal from '@/components/products/CartModal'
 import DepositSidebar from '@/components/products/DepositSidebar'
+import { fetchDepositProducts, getDepositSlugByProductId, toDepositProductCard } from '@/lib/deposit-api'
 
 type Product = {
   id: string
@@ -33,6 +34,7 @@ const DEPOSIT_PRODUCTS: Product[] = [
     desc: '가입 조건을 직접 설계하는',
     period: '36개월 기준',
     rate: '연 2.2%~2.3%',
+    canApply: true,
   },
   {
     id: 'regular',
@@ -41,6 +43,7 @@ const DEPOSIT_PRODUCTS: Product[] = [
     desc: '목돈 모아 안정수익 마음든든',
     period: '36개월 기준',
     rate: '연 2.25%~2.25%',
+    canApply: true,
   },
   {
     id: 'axful-youth',
@@ -53,7 +56,8 @@ const DEPOSIT_PRODUCTS: Product[] = [
   },
 ]
 
-const SAVINGS_PRODUCTS: Product[] = [
+// 자유적금 (saving_type = FREE)
+const FREE_SAVINGS_PRODUCTS: Product[] = [
   {
     id: 'axful-free',
     name: 'AXful 내맘대로적금',
@@ -71,6 +75,7 @@ const SAVINGS_PRODUCTS: Product[] = [
     period: '6개월 기준',
     rate: '연 1%~7.2%',
     isNew: true,
+    canApply: true,
   },
   {
     id: 'axful-green',
@@ -82,20 +87,54 @@ const SAVINGS_PRODUCTS: Product[] = [
     canApply: true,
   },
   {
-    id: 'axful-soldier',
-    name: 'AXful 장병내일준비적금',
-    channel: '스타뱅킹',
-    desc: '국군장병 미래대비 앞날준비',
-    period: '24개월 기준',
-    rate: '연 5%~10.5%',
-  },
-  {
     id: 'axful-star-savings',
     name: 'AXful 특★한 적금',
     channel: '스타뱅킹',
     desc: '고객 모두의 높은 수익을 위한 특별한 준비',
     period: '1개월 기준',
     rate: '연 2%~6%',
+    canApply: true,
+  },
+]
+
+// 정기적금 (saving_type = REGULAR)
+const REGULAR_SAVINGS_PRODUCTS: Product[] = [
+  {
+    id: 'axful-soldier',
+    name: 'AXful 장병내일준비적금',
+    channel: '스타뱅킹',
+    desc: '국군장병 미래대비 앞날준비',
+    period: '24개월 기준',
+    rate: '연 5%~10.5%',
+    canApply: true,
+  },
+  {
+    id: 'axful-work',
+    name: 'AXful 직장인우대적금',
+    channel: '인터넷·스타뱅킹',
+    desc: '급여이체 고객 우대금리 제공',
+    period: '12~36개월',
+    rate: '연 3.2%~4.5%',
+    canApply: true,
+  },
+  {
+    id: 'axful-dream',
+    name: 'AXful 꿈적금',
+    channel: '인터넷·스타뱅킹',
+    desc: '목표금액 설정으로 꿈을 향해 꾸준히',
+    period: '12~36개월',
+    rate: '연 3.0%~4.2%',
+    canApply: true,
+  },
+  {
+    id: 'axful-together',
+    name: 'AXful 함께적금',
+    channel: '스타뱅킹',
+    desc: '가족·연인과 함께 모으는 공동 적금',
+    period: '6~24개월',
+    rate: '연 2.8%~4.0%',
+    isNew: true,
+    canApply: true,
   },
 ]
 
@@ -106,6 +145,7 @@ const CHECKING_PRODUCTS: Product[] = [
     channel: '영업점',
     desc: '쇼핑용 아껴 쏙머니가 쏙~',
     isNew: true,
+    canApply: true,
   },
   {
     id: 'election',
@@ -133,6 +173,7 @@ const CHECKING_PRODUCTS: Product[] = [
     name: '모니모 AXful 매일이자 통장',
     channel: '영업점',
     desc: '하루만 넣어도 이자가 쌓이는',
+    canApply: true,
   },
   {
     id: 'axful-moim',
@@ -183,11 +224,12 @@ const HOUSING_PRODUCTS: Product[] = [
     channel: '스타뱅킹',
     period: '24개월 기준',
     rate: '연 3.1%~4.5%',
+    canApply: true,
   },
 ]
 
-type Tab = '예금' | '적금' | '입출금자유' | '주택청약'
-const TABS: Tab[] = ['예금', '적금', '입출금자유', '주택청약']
+type Tab = '예금' | '정기적금' | '자유적금' | '입출금자유' | '주택청약'
+const TABS: Tab[] = ['예금', '정기적금', '자유적금', '입출금자유', '주택청약']
 
 const DEPOSIT_PRODUCT_TYPES = ['전체', '정기예금', '지수연동예금', '시장성예금']
 const JOIN_METHODS = ['전체', '인터넷뱅킹', '스타뱅킹', 'AXful Next', '영업점']
@@ -195,6 +237,61 @@ const JOIN_PERIODS = ['전체', '3개월 미만', '3-6개월 미만', '6-12개�
 
 export default function DepositListPage() {
   const [tab, setTab] = useState<Tab>('예금')
+  const [apiProductsMap, setApiProductsMap] = useState<Partial<Record<Tab, Product[]>>>({})
+
+  // URL ?tab= 파라미터로 초기 탭 설정 (클라이언트 전용)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const raw = params.get('tab') as Tab | null
+    if (raw && (TABS as readonly string[]).includes(raw)) {
+      setTab(raw)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadProducts() {
+      try {
+        const products = await fetchDepositProducts({ productStatus: 'SELLING' })
+        if (cancelled) return
+
+        const next: Partial<Record<Tab, Product[]>> = {
+          '예금': [],
+          '정기적금': [],
+          '자유적금': [],
+          '입출금자유': [],
+          '주택청약': [],
+        }
+
+        products.forEach(product => {
+          const card = toDepositProductCard(product)
+          const slug = getDepositSlugByProductId(product.productId)
+          if (product.productType === 'SUBSCRIPTION') {
+            next['주택청약']?.push(card)
+          } else if (product.productType === 'SAVINGS') {
+            if (['axful-soldier', 'axful-work', 'axful-dream', 'axful-together'].includes(slug)) {
+              next['정기적금']?.push(card)
+            } else {
+              next['자유적금']?.push(card)
+            }
+          } else if (product.productName.includes('통장')) {
+            next['입출금자유']?.push(card)
+          } else {
+            next['예금']?.push(card)
+          }
+        })
+
+        setApiProductsMap(next)
+      } catch {
+        setApiProductsMap({})
+      }
+    }
+
+    loadProducts()
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const [productType, setProductType] = useState('전체')
   const [joinMethod, setJoinMethod] = useState('전체')
   const [joinPeriod, setJoinPeriod] = useState('전체')
@@ -203,13 +300,15 @@ export default function DepositListPage() {
 
   const productsMap: Record<Tab, Product[]> = {
     '예금': DEPOSIT_PRODUCTS,
-    '적금': SAVINGS_PRODUCTS,
+    '정기적금': REGULAR_SAVINGS_PRODUCTS,
+    '자유적금': FREE_SAVINGS_PRODUCTS,
     '입출금자유': CHECKING_PRODUCTS,
     '주택청약': HOUSING_PRODUCTS,
   }
-  const products = productsMap[tab]
+  const products = (apiProductsMap[tab]?.length ? apiProductsMap[tab] : productsMap[tab])
+    .filter(product => !searchName.trim() || product.name.includes(searchName.trim()))
 
-  const showPeriodFilter = tab === '예금' || tab === '적금'
+  const showPeriodFilter = tab === '예금' || tab === '정기적금' || tab === '자유적금'
   const showProductTypeFilter = tab === '예금'
   const showHousingNote = tab === '주택청약'
 
@@ -239,22 +338,21 @@ export default function DepositListPage() {
             <span>예금</span><span>&gt;</span>
             <span className="font-semibold text-kb-text">예금 상품/가입</span>
             <span>&gt;</span>
-            <Link href="#" className="text-kb-blue hover:underline">도움말</Link>
+            <Link href="#" className="font-medium hover:underline" style={{ color: '#0D5C47' }}>도움말</Link>
           </div>
 
-          <h1 className="text-[20px] font-bold text-kb-text mb-4">예금 상품/가입</h1>
+          <h1 className="text-[22px] font-bold text-kb-text mb-5">예금 상품/가입</h1>
 
           {/* 탭 */}
-          <div className="flex border-b border-kb-border mb-5">
+          <div className="flex border-b mb-5" style={{ borderColor: '#E2F5EF' }}>
             {TABS.map(t => (
               <button
                 key={t}
                 onClick={() => handleTabChange(t)}
-                className={`px-8 py-3 text-[14px] font-medium transition-colors
-                  ${tab === t
-                    ? 'border-b-2 border-kb-text text-kb-text bg-white -mb-px'
-                    : 'text-kb-text-muted hover:text-kb-text'
-                  }`}
+                className="px-8 py-3 text-[14px] font-medium transition-colors border-b-2 -mb-px"
+                style={tab === t
+                  ? { borderColor: '#0D5C47', color: '#0D5C47', fontWeight: 700, backgroundColor: 'white' }
+                  : { borderColor: 'transparent', color: '#9CA3AF', backgroundColor: '#F8FFFE' }}
               >
                 {t}
               </button>
@@ -262,24 +360,25 @@ export default function DepositListPage() {
           </div>
 
           {/* 필터 */}
-          <div className="border border-kb-border p-5 mb-5 bg-kb-beige-light">
+          <div className="rounded-xl p-5 mb-5" style={{ border: '1px solid #E2F5EF', backgroundColor: '#F8FFFE' }}>
             <div className="grid grid-cols-[100px_1fr] gap-y-3 text-[13px] items-center">
-              <span className="text-kb-text font-semibold">• 상품명</span>
+              <span className="font-semibold text-kb-text">• 상품명</span>
               <input
                 type="text"
                 value={searchName}
                 onChange={e => setSearchName(e.target.value)}
-                className="border border-kb-border px-3 py-1.5 text-[13px] w-64 bg-white"
+                className="border rounded-lg px-3 py-1.5 text-[13px] w-64 outline-none bg-white"
+                style={{ borderColor: '#D1D5DB' }}
               />
 
               {showProductTypeFilter && (
                 <>
-                  <span className="text-kb-text font-semibold">• 상품유형</span>
+                  <span className="font-semibold text-kb-text">• 상품유형</span>
                   <div className="flex items-center gap-5">
                     {DEPOSIT_PRODUCT_TYPES.map(v => (
-                      <label key={v} className="flex items-center gap-1.5 cursor-pointer">
+                      <label key={v} className="flex items-center gap-1.5 cursor-pointer text-kb-text-body">
                         <input type="radio" name="productType" checked={productType === v}
-                          onChange={() => setProductType(v)} className="accent-kb-yellow" />
+                          onChange={() => setProductType(v)} style={{ accentColor: '#0D5C47' }} />
                         {v}
                       </label>
                     ))}
@@ -287,12 +386,12 @@ export default function DepositListPage() {
                 </>
               )}
 
-              <span className="text-kb-text font-semibold">• 가입방법</span>
+              <span className="font-semibold text-kb-text">• 가입방법</span>
               <div className="flex items-center gap-5">
                 {JOIN_METHODS.map(v => (
-                  <label key={v} className="flex items-center gap-1.5 cursor-pointer">
+                  <label key={v} className="flex items-center gap-1.5 cursor-pointer text-kb-text-body">
                     <input type="radio" name="joinMethod" checked={joinMethod === v}
-                      onChange={() => setJoinMethod(v)} className="accent-kb-yellow" />
+                      onChange={() => setJoinMethod(v)} style={{ accentColor: '#0D5C47' }} />
                     {v}
                   </label>
                 ))}
@@ -300,12 +399,12 @@ export default function DepositListPage() {
 
               {showPeriodFilter && (
                 <>
-                  <span className="text-kb-text font-semibold">• 가입기간</span>
+                  <span className="font-semibold text-kb-text">• 가입기간</span>
                   <div className="flex items-center gap-4 flex-wrap">
                     {JOIN_PERIODS.map(v => (
-                      <label key={v} className="flex items-center gap-1.5 cursor-pointer">
+                      <label key={v} className="flex items-center gap-1.5 cursor-pointer text-kb-text-body">
                         <input type="radio" name="joinPeriod" checked={joinPeriod === v}
-                          onChange={() => setJoinPeriod(v)} className="accent-kb-yellow" />
+                          onChange={() => setJoinPeriod(v)} style={{ accentColor: '#0D5C47' }} />
                         {v}
                       </label>
                     ))}
@@ -314,16 +413,19 @@ export default function DepositListPage() {
               )}
             </div>
             <div className="flex justify-center mt-4">
-              <button className="bg-kb-text text-white px-12 py-2 text-[14px] font-bold hover:bg-kb-taupe">조회</button>
+              <button className="px-16 py-2.5 text-[14px] font-bold text-white rounded-xl hover:opacity-85 transition-opacity"
+                style={{ backgroundColor: '#0D5C47' }}>
+                조회
+              </button>
             </div>
           </div>
 
           {/* 목록 헤더 */}
           <div className="flex justify-between items-center mb-2">
             <p className="text-[13px] text-kb-text">
-              상품목록 <span className="text-kb-red font-bold">{products.length}</span>건
+              상품목록 <span className="font-bold" style={{ color: '#0D5C47' }}>{products.length}</span>건
             </p>
-            <select className="border border-kb-border px-2 py-1 text-[12px]">
+            <select className="border rounded-lg px-2 py-1 text-[12px] outline-none" style={{ borderColor: '#E2F5EF' }}>
               <option>금리순</option>
               <option>기간순</option>
               <option>상품명순</option>
@@ -331,17 +433,21 @@ export default function DepositListPage() {
           </div>
 
           {/* 상품 목록 */}
-          <div className="divide-y divide-kb-border border-t border-kb-border-dark">
-            {products.map(product => (
-              <div key={product.id} className="py-5 hover:bg-kb-beige-light transition-colors px-2">
+          <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #E2F5EF' }}>
+            {products.map((product, idx) => (
+              <div key={product.id}
+                className="py-5 px-5 hover:bg-[#F8FFFE] transition-colors"
+                style={{ borderBottom: idx < products.length - 1 ? '1px solid #E2F5EF' : 'none' }}>
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[11px] border border-kb-border px-1.5 py-0.5 text-kb-text-muted">
+                      <span className="text-[11px] rounded px-1.5 py-0.5 text-kb-text-muted"
+                        style={{ border: '1px solid #E2F5EF', backgroundColor: '#F0FAF7' }}>
                         {product.channel}
                       </span>
                       {product.isNew && (
-                        <span className="text-[11px] bg-kb-red text-white px-1.5 py-0.5 font-bold">NEW</span>
+                        <span className="text-[11px] rounded px-1.5 py-0.5 font-bold text-white"
+                          style={{ backgroundColor: '#5BC9A8' }}>NEW</span>
                       )}
                     </div>
                     <Link href={`/products/deposit/${product.id}`}
@@ -354,23 +460,26 @@ export default function DepositListPage() {
                     {(product.period || product.rate) && (
                       <p className="text-[13px] mt-1">
                         {product.period && <span className="text-kb-text-muted">{product.period}, </span>}
-                        {product.rate && <span className="font-bold text-orange-600">{product.rate}</span>}
+                        {product.rate && <span className="font-bold" style={{ color: '#0D5C47' }}>{product.rate}</span>}
                       </p>
                     )}
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       onClick={() => setCartProduct(product.name)}
-                      className="border border-kb-border px-3 py-1.5 text-[13px] text-kb-text-body hover:bg-kb-beige-light"
+                      className="border rounded-lg px-3 py-1.5 text-[13px] hover:bg-[#F0FAF7] transition-colors"
+                      style={{ borderColor: '#E2F5EF' }}
                     >
                       🛒
                     </button>
-                    <button className="border border-kb-border px-4 py-1.5 text-[13px] text-kb-text-body hover:bg-kb-beige-light">
+                    <button className="border rounded-lg px-4 py-1.5 text-[13px] font-medium hover:bg-[#F0FAF7] transition-colors"
+                      style={{ borderColor: '#5BC9A8', color: '#0D5C47' }}>
                       비교하기
                     </button>
                     {product.canApply && (
-                      <Link href={`/products/deposit/${product.id}`}
-                        className="bg-kb-yellow px-5 py-1.5 text-[13px] font-bold text-kb-text hover:bg-kb-yellow-dark">
+                      <Link href={`/products/deposit/join/${product.id}`}
+                        className="rounded-xl px-5 py-1.5 text-[13px] font-bold text-white hover:opacity-85 transition-opacity"
+                        style={{ backgroundColor: '#0D5C47' }}>
                         가입하기
                       </Link>
                     )}
@@ -389,7 +498,8 @@ export default function DepositListPage() {
 
           {/* 페이지네이션 */}
           <div className="flex justify-center mt-8 gap-1">
-            <button className="w-7 h-7 text-[13px] border border-kb-yellow bg-kb-yellow text-kb-text font-bold">1</button>
+            <button className="w-8 h-8 text-[13px] rounded-lg font-bold text-white"
+              style={{ backgroundColor: '#0D5C47' }}>1</button>
           </div>
         </main>
       </div>

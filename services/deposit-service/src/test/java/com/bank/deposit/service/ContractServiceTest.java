@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -22,6 +23,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
@@ -37,6 +39,7 @@ class ContractServiceTest {
     @Mock private ProductRepository productRepository;
     @Mock private ContractAppliedRateRepository appliedRateRepository;
     @Mock private ContractSpecialTermAgreementRepository agreementRepository;
+    @Mock private PasswordEncoder passwordEncoder;
 
     @Nested
     @DisplayName("계약 목록 조회")
@@ -112,6 +115,7 @@ class ContractServiceTest {
             given(productRepository.findById(1L)).willReturn(Optional.of(sellingProduct()));
             given(contractRepository.save(any(Contract.class))).willAnswer(inv -> inv.getArgument(0));
             given(accountRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+            given(passwordEncoder.encode(anyString())).willReturn("encoded-pw");
 
             Contract result = contractService.createContract(
                     "CUST-001", 1L, BigDecimal.valueOf(1_000_000), 12,
@@ -185,4 +189,35 @@ class ContractServiceTest {
                     .minJoinAmount(BigDecimal.valueOf(100_000))
                     .maxJoinAmount(BigDecimal.valueOf(100_000_000))
                     .build();
-            given(productRepository.findById(1L)).willReturn(Optional.
+            given(productRepository.findById(1L)).willReturn(Optional.of(product));
+
+            assertThatThrownBy(() -> contractService.createContract(
+                    "CUST-001", 1L, BigDecimal.valueOf(200_000_000), 12,
+                    JoinChannel.WEB, null, null, null, false, false, null,
+                    null, null, null, "1234"))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("최대 가입금액");
+        }
+    }
+
+    // --- helpers ---
+
+    private Contract contract(String customerId) {
+        return Contract.builder()
+                .customerId(customerId)
+                .contractNumber("CTR-TEST")
+                .contractStatus(ContractStatus.ACTIVE)
+                .build();
+    }
+
+    private Product sellingProduct() {
+        return Product.builder()
+                .productType(ProductType.DEPOSIT)
+                .productName("정기예금")
+                .baseInterestRate(BigDecimal.valueOf(3.0))
+                .productStatus(ProductStatus.SELLING)
+                .minJoinAmount(BigDecimal.valueOf(100_000))
+                .maxJoinAmount(BigDecimal.valueOf(100_000_000))
+                .build();
+    }
+}
