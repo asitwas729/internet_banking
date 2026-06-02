@@ -29,7 +29,11 @@ public class PsiDriftBatchJob implements Tasklet {
 
     @Override
     public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
-        LocalDate calcWeek = LocalDate.now().with(DayOfWeek.MONDAY);
+        String calcWeekParam = (String) chunkContext.getStepContext()
+            .getJobParameters().get("calcWeek");
+        LocalDate calcWeek = (calcWeekParam != null)
+            ? LocalDate.parse(calcWeekParam)
+            : LocalDate.now().with(DayOfWeek.MONDAY);
 
         // 지난 주 데이터 (실제: 1주치; 테스트: 2040년 전체)
         LocalDate weekStart = calcWeek.minusWeeks(1);
