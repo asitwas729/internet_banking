@@ -1,12 +1,14 @@
 package com.bank.ai.drift;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Component
@@ -14,8 +16,9 @@ import java.util.List;
 public class DriftAlertService {
 
     private final MeterRegistry registry;
+    private final ConcurrentHashMap<String, AtomicReference<Double>> psiGauges = new ConcurrentHashMap<>();
 
-    /** CRITICAL PSI → 메트릭 카운터 + WARN 로그. */
+    /** CRITICAL PSI → 메트릭 카운터 + WARN 로그. PSI 값은 feature별 gauge에 항상 갱신. */
     public void alert(PsiDriftReport report) {
         if (report.status() == PsiStatus.CRITICAL) {
             Counter.builder("ai.drift.psi.critical.total")
@@ -24,9 +27,13 @@ public class DriftAlertService {
                 .increment();
             log.warn("[Drift] PSI CRITICAL feature={} psi={}", report.featureName(), report.psiValue());
         }
-        // 최신 PSI Gauge 등록
-        registry.gauge("ai.drift.psi.value",
-            List.of(io.micrometer.core.instrument.Tag.of("feature", report.featureName())),
-            report.psiValue());
+        AtomicReference<Double> holder = psiGauges.computeIfAbsent(report.featureName(), feature -> {
+            AtomicReference<Double> ref = new AtomicReference<>(Double.NaN);
+            Gauge.builder("ai.drift.psi.value", ref, AtomicReference::get)
+                .tag("feature", feature)
+                .register(registry);
+            return ref;
+        });
+        holder.set(report.psiValue());
     }
 }
