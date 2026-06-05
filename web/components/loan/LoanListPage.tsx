@@ -92,7 +92,7 @@ export default function LoanListPage({ loanTypeCd, pageTitle, activeHref }: Prop
             <h1 className="text-[26px] font-bold text-kb-text mb-5">{pageTitle}</h1>
 
             {/* 카테고리 탭 */}
-            <div className="flex border-b mb-6" style={{ borderColor: '#E2F5EF' }}>
+            <div className="flex border-b border-kb-border mb-6">
               {FILTER_TABS.map(tab => (
                 <Link key={tab.href} href={tab.href}
                   className={`px-5 py-3 text-[14px] font-medium whitespace-nowrap transition-colors border-b-2 -mb-px

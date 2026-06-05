@@ -66,10 +66,10 @@ export default function IdentityVerificationPage() {
           <span>&gt;</span>
           <span className="font-semibold text-kb-text">본인확인</span>
         </div>
-        <h1 className="text-[22px] font-bold text-kb-text mb-6 pb-2 border-b-2 border-[#0D5C47]">본인확인</h1>
+        <h1 className="text-[22px] font-bold text-kb-text mb-6 pb-2 border-b-2 border-kb-text">본인확인</h1>
 
         <div className="flex flex-col items-center py-12">
-          <div className="w-20 h-20 rounded-full bg-[#0D5C47] flex items-center justify-center mb-5">
+          <div className="w-20 h-20 rounded-full bg-kb-yellow flex items-center justify-center mb-5">
             <svg viewBox="0 0 40 40" fill="none" className="w-10 h-10">
               <path d="M8 20l8 8 16-16" stroke="#333" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -99,7 +99,7 @@ export default function IdentityVerificationPage() {
         <span className="font-semibold text-kb-text">본인확인</span>
       </div>
 
-      <h1 className="text-[22px] font-bold text-kb-text mb-6 pb-2 border-b-2 border-[#0D5C47]">본인확인</h1>
+      <h1 className="text-[22px] font-bold text-kb-text mb-6 pb-2 border-b-2 border-kb-text">본인확인</h1>
 
       <div className="border border-[#b3cce8] bg-[#f0f6ff] p-4 mb-6 text-[13px] text-kb-text-body leading-relaxed">
         <p>· 대출 신청 본인 여부를 확인합니다. 현재는 간편 인증 stub으로 항상 통과 처리됩니다.</p>
@@ -107,7 +107,7 @@ export default function IdentityVerificationPage() {
       </div>
 
       <section className="mb-6">
-        <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-[#E2F5EF]">
+        <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-kb-border">
           인증 방법 선택 <span className="text-kb-red text-[11px] font-normal ml-1">* 필수</span>
         </h2>
         <div className="grid grid-cols-3 gap-4">
@@ -129,7 +129,7 @@ export default function IdentityVerificationPage() {
       </section>
 
       <section className="mb-6">
-        <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-[#E2F5EF]">
+        <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-kb-border">
           휴대폰 번호 입력 <span className="text-kb-red text-[11px] font-normal ml-1">* 필수</span>
         </h2>
         <div className="border border-[#E2F5EF] divide-y divide-kb-border overflow-hidden">
@@ -142,7 +142,7 @@ export default function IdentityVerificationPage() {
               value={formatMobile(mobileNo)}
               onChange={onMobileChange}
               placeholder="010-0000-0000"
-              className="flex-1 border border-[#E2F5EF] px-3 py-2 text-[13px] focus:outline-none max-w-xs"
+              className="flex-1 border border-kb-border px-3 py-2 text-[13px] focus:outline-none max-w-xs"
             />
           </div>
         </div>
@@ -153,7 +153,7 @@ export default function IdentityVerificationPage() {
       <div className="flex justify-center gap-3">
         <Link
           href="/loans/apply"
-          className="px-14 py-3 border border-[#E2F5EF] text-[14px] text-kb-text hover:bg-[#F0FAF7] transition-colors"
+          className="px-14 py-3 border border-kb-border text-[14px] text-kb-text hover:bg-kb-beige-light transition-colors"
         >
           취소
         </Link>
@@ -162,7 +162,7 @@ export default function IdentityVerificationPage() {
           disabled={!canSubmit}
           className={`px-14 py-3 text-[14px] font-bold transition-all ${
             canSubmit
-              ? 'bg-[#0D5C47] text-white hover:opacity-85'
+              ? 'bg-kb-yellow text-kb-text hover:brightness-95'
               : 'bg-gray-200 text-gray-400 cursor-not-allowed'
           }`}
         >

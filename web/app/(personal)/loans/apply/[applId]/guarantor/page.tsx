@@ -137,7 +137,7 @@ export default function GuarantorPage() {
         <span className="font-semibold text-kb-text">보증인 동의</span>
       </div>
 
-      <h1 className="text-[22px] font-bold text-kb-text mb-6 pb-2 border-b-2 border-[#0D5C47]">보증인 동의</h1>
+      <h1 className="text-[22px] font-bold text-kb-text mb-6 pb-2 border-b-2 border-kb-text">보증인 동의</h1>
 
       <div className="border border-[#E2F5EF] bg-[#F0FAF7] p-4 mb-6 text-[13px] text-kb-text-body leading-relaxed">
         <p>· 보증인을 등록한 후 전자서명을 완료해야 보증이 유효합니다.</p>
@@ -147,13 +147,13 @@ export default function GuarantorPage() {
       {/* 등록된 보증인 목록 */}
       {!loading && items.length > 0 && (
         <section className="mb-8">
-          <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-[#E2F5EF]">등록된 보증인</h2>
+          <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-kb-border">등록된 보증인</h2>
           <div className="space-y-3">
             {items.map(g => {
-              const status = STATUS_LABEL[g.gagrStatusCd] ?? { text: g.gagrStatusCd, cls: 'border-[#E2F5EF] text-kb-text-muted' }
+              const status = STATUS_LABEL[g.gagrStatusCd] ?? { text: g.gagrStatusCd, cls: 'border-kb-border text-kb-text-muted' }
               return (
-                <div key={g.gagrId} className="border border-[#E2F5EF] rounded-xl overflow-hidden">
-                  <div className="bg-[#F0FAF7] px-5 py-3 flex justify-between items-center border-b border-[#E2F5EF]">
+                <div key={g.gagrId} className="border border-kb-border rounded-xl overflow-hidden">
+                  <div className="bg-kb-beige-light px-5 py-3 flex justify-between items-center border-b border-kb-border">
                     <div className="flex items-center gap-3">
                       <span className="text-[13px] font-bold text-kb-text">{g.guarantorNameMasked}</span>
                       <span className="text-[12px] text-kb-text-muted">{g.mobileNoMasked}</span>
@@ -181,7 +181,7 @@ export default function GuarantorPage() {
                     )}
                   </div>
                   {g.gagrStatusCd !== 'CANCELED' && (
-                    <div className="px-5 py-3 border-t border-[#E2F5EF] flex gap-2">
+                    <div className="px-5 py-3 border-t border-kb-border flex gap-2">
                       {g.gagrStatusCd === 'REGISTERED' && (
                         <button onClick={() => { setSigningId(g.gagrId); setSiginingError('') }}
                           className="px-5 py-1.5 bg-[#0D5C47] border border-kb-text text-[12px] font-bold text-kb-text hover:brightness-95 transition-all">
@@ -189,7 +189,7 @@ export default function GuarantorPage() {
                         </button>
                       )}
                       <button onClick={() => { setCancelingId(g.gagrId); setCancelRemark('') }}
-                        className="px-5 py-1.5 border border-[#E2F5EF] text-[12px] text-kb-text-muted hover:bg-[#F0FAF7] transition-colors">
+                        className="px-5 py-1.5 border border-kb-border text-[12px] text-kb-text-muted hover:bg-kb-beige-light transition-colors">
                         취소
                       </button>
                     </div>
@@ -212,7 +212,7 @@ export default function GuarantorPage() {
             </label>
             <input value={name} onChange={e => setName(e.target.value)}
               placeholder="실명 입력"
-              className="border border-[#E2F5EF] px-3 py-2 text-[13px] focus:outline-none w-48" />
+              className="border border-kb-border px-3 py-2 text-[13px] focus:outline-none w-48" />
           </div>
 
           <div className="flex items-center px-5 py-4 gap-4">
@@ -223,7 +223,7 @@ export default function GuarantorPage() {
               value={formatMobile(mobile)}
               onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 11))}
               placeholder="010-0000-0000"
-              className="border border-[#E2F5EF] px-3 py-2 text-[13px] focus:outline-none w-48" />
+              className="border border-kb-border px-3 py-2 text-[13px] focus:outline-none w-48" />
           </div>
 
           <div className="flex items-center px-5 py-4 gap-4">
@@ -268,7 +268,7 @@ export default function GuarantorPage() {
                 value={amount ? parseInt(amount.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
                 onChange={e => setAmount(e.target.value.replace(/[^\d]/g, ''))}
                 placeholder="0"
-                className="border border-[#E2F5EF] px-3 py-2 text-[13px] w-40 focus:outline-none text-right" />
+                className="border border-kb-border px-3 py-2 text-[13px] w-40 focus:outline-none text-right" />
               <span className="text-[13px] text-kb-text">원</span>
             </div>
           </div>
@@ -279,13 +279,13 @@ export default function GuarantorPage() {
 
       <div className="flex justify-center gap-3 mb-8">
         <Link href={`/loans/apply/result?applId=${applId}`}
-          className="px-10 py-3 border border-[#E2F5EF] text-[14px] text-kb-text hover:bg-[#F0FAF7] transition-colors">
+          className="px-10 py-3 border border-kb-border text-[14px] text-kb-text hover:bg-kb-beige-light transition-colors">
           신청 결과로
         </Link>
         <button onClick={handleRegister} disabled={!canSubmit}
           className={`px-14 py-3 text-[14px] font-bold transition-all ${
             canSubmit
-              ? 'bg-[#0D5C47] text-white hover:opacity-85'
+              ? 'bg-kb-yellow text-kb-text hover:brightness-95'
               : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
           {submitting ? '등록 중...' : '보증인 등록'}
         </button>
@@ -302,7 +302,7 @@ export default function GuarantorPage() {
             {signingError && <p className="text-[12px] text-kb-red mb-3">{signingError}</p>}
             <div className="flex gap-2 justify-end">
               <button onClick={() => setSigningId(null)}
-                className="px-6 py-2 border border-[#E2F5EF] text-[13px] text-kb-text hover:bg-[#F0FAF7]">
+                className="px-6 py-2 border border-kb-border text-[13px] text-kb-text hover:bg-kb-beige-light">
                 취소
               </button>
               <button onClick={() => handleSign(signingId)} disabled={actionLoading}
@@ -322,10 +322,10 @@ export default function GuarantorPage() {
             <p className="text-[13px] text-kb-text-body mb-4">취소 사유를 입력해 주세요 (선택).</p>
             <textarea value={cancelRemark} onChange={e => setCancelRemark(e.target.value)}
               rows={3} placeholder="취소 사유"
-              className="w-full border border-[#E2F5EF] px-3 py-2 text-[13px] focus:outline-none mb-4 resize-none" />
+              className="w-full border border-kb-border px-3 py-2 text-[13px] focus:outline-none mb-4 resize-none" />
             <div className="flex gap-2 justify-end">
               <button onClick={() => setCancelingId(null)}
-                className="px-6 py-2 border border-[#E2F5EF] text-[13px] text-kb-text hover:bg-[#F0FAF7]">
+                className="px-6 py-2 border border-kb-border text-[13px] text-kb-text hover:bg-kb-beige-light">
                 닫기
               </button>
               <button onClick={() => handleCancel(cancelingId)} disabled={actionLoading}

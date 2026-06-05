@@ -852,7 +852,7 @@ function GuaranteeInsuranceForm({ contracts, selectedId, setSelectedId }: {
   return (
     <div>
       <div className="border border-[#E2F5EF] bg-[#F0FAF7] px-5 py-4 mb-6 text-[13px] text-kb-text-body space-y-1">
-        <p>· 외부 보증기관(SGI/HUG/HF) stub — 발급 요청 즉시 ISSUED 처리됩니다.</p>
+        <p>· 외부 보증기관(SGI/HUG/HF) stub ? 발급 요청 즉시 ISSUED 처리됩니다.</p>
         <p>· 계약 상태가 SIGNED 또는 ACTIVE인 경우 발급 가능하며, 활성 보증보험이 1건 초과될 수 없습니다.</p>
       </div>
 

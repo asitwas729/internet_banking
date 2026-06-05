@@ -129,7 +129,7 @@ export default function LoanApplyPage() {
         <span className="font-semibold text-kb-text">대출 신청</span>
       </div>
 
-      <h1 className="text-[22px] font-bold text-kb-text mb-6 pb-2 border-b-2 border-[#0D5C47]">대출 신청</h1>
+      <h1 className="text-[22px] font-bold text-kb-text mb-6 pb-2 border-b-2 border-kb-text">대출 신청</h1>
 
       <div className="flex items-center justify-center gap-0 mb-8">
         {STEPS.map((step, i) => (
@@ -148,7 +148,7 @@ export default function LoanApplyPage() {
 
       {/* 대출 상품 선택 */}
       <section className="mb-6">
-        <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-[#E2F5EF]">
+        <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-kb-border">
           대출 상품 선택 <span className="text-kb-red text-[11px] font-normal ml-1">* 필수</span>
         </h2>
         {products.length === 0 ? (
@@ -180,15 +180,15 @@ export default function LoanApplyPage() {
               <div className="flex items-center gap-2">
                 <input type="text" value={formatAmountDisplay(amount)}
                   onChange={e => setAmount(e.target.value.replace(/,/g, ''))}
-                  className="flex-1 border border-[#E2F5EF] px-3 py-2 text-[13px] focus:outline-none text-right" placeholder="0" />
+                  className="flex-1 border border-kb-border px-3 py-2 text-[13px] focus:outline-none text-right" placeholder="0" />
                 <span className="text-[13px] text-kb-text">원</span>
               </div>
               <div className="flex gap-1.5 flex-wrap">
                 {[100, 300, 500, 1000, 3000, 5000].map(v => (
                   <button key={v} onClick={() => setAmount(String(v * 10000))}
-                    className="border border-[#E2F5EF] px-3 py-1 text-[11px] text-kb-text-body hover:bg-[#F0FAF7]">+{v}만</button>
+                    className="border border-kb-border px-3 py-1 text-[11px] text-kb-text-body hover:bg-kb-beige-light">+{v}만</button>
                 ))}
-                <button onClick={() => setAmount('')} className="border border-[#E2F5EF] px-3 py-1 text-[11px] text-kb-text-muted hover:bg-[#F0FAF7]">초기화</button>
+                <button onClick={() => setAmount('')} className="border border-kb-border px-3 py-1 text-[11px] text-kb-text-muted hover:bg-kb-beige-light">초기화</button>
               </div>
             </div>
           </div>
@@ -213,7 +213,7 @@ export default function LoanApplyPage() {
               대출 목적 <span className="text-kb-red">*</span>
             </label>
             <select value={purpose} onChange={e => setPurpose(e.target.value)}
-              className="border border-[#E2F5EF] px-3 py-2 text-[13px] focus:outline-none w-48">
+              className="border border-kb-border px-3 py-2 text-[13px] focus:outline-none w-48">
               <option value="">선택하세요</option>
               {PURPOSES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
@@ -224,7 +224,7 @@ export default function LoanApplyPage() {
               고용 형태 <span className="text-kb-red">*</span>
             </label>
             <select value={employmentType} onChange={e => setEmploymentType(e.target.value)}
-              className="border border-[#E2F5EF] px-3 py-2 text-[13px] focus:outline-none w-48">
+              className="border border-kb-border px-3 py-2 text-[13px] focus:outline-none w-48">
               <option value="">선택하세요</option>
               {EMPLOYMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
@@ -235,7 +235,7 @@ export default function LoanApplyPage() {
             <div className="flex items-center gap-2">
               <input type="text" value={annualIncome}
                 onChange={e => setAnnualIncome(e.target.value.replace(/[^\d]/g, ''))}
-                className="border border-[#E2F5EF] px-3 py-2 text-[13px] w-36 focus:outline-none text-right" placeholder="0" />
+                className="border border-kb-border px-3 py-2 text-[13px] w-36 focus:outline-none text-right" placeholder="0" />
               <span className="text-[13px] text-kb-text">만원</span>
             </div>
           </div>
@@ -244,8 +244,8 @@ export default function LoanApplyPage() {
 
       {/* 한도조회 (신용점수 미리보기) */}
       <section className="mb-6">
-        <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-[#E2F5EF]">한도조회 (선택)</h2>
-        <div className="border border-[#E2F5EF] bg-[#F0FAF7] p-4 mb-3 text-[13px] text-kb-text-body">
+        <h2 className="text-lg font-bold text-kb-text mb-5 pb-2 border-b border-kb-border">한도조회 (선택)</h2>
+        <div className="border border-kb-border bg-kb-beige-light p-4 mb-3 text-[13px] text-kb-text-body">
           <p>· 신청 전 예상 한도·금리·신용점수를 미리 확인합니다. 별도 신용조회 동의가 적용됩니다.</p>
           <p>· 조회 결과는 실제 심사 결과와 다를 수 있습니다.</p>
         </div>
@@ -258,8 +258,8 @@ export default function LoanApplyPage() {
         </div>
         {previewError && <p className="text-[13px] text-kb-red mt-3">{previewError}</p>}
         {previewResult && (
-          <div className="mt-4 border border-[#E2F5EF]">
-            <div className="bg-[#F0FAF7] px-5 py-3 border-b border-[#E2F5EF]">
+          <div className="mt-4 border border-kb-border">
+            <div className="bg-kb-beige-light px-5 py-3 border-b border-kb-border">
               <p className="text-[13px] font-bold text-kb-text">한도조회 결과</p>
             </div>
             <div className="divide-y divide-kb-border text-[13px]">
@@ -271,19 +271,19 @@ export default function LoanApplyPage() {
               )}
               {previewResult.estimatedLimitAmt != null && (
                 <div className="flex">
-                  <div className="w-36 px-5 py-3 bg-[#F0FAF7] font-medium text-kb-text flex-shrink-0">예상 한도</div>
+                  <div className="w-36 px-5 py-3 bg-kb-beige-light font-medium text-kb-text flex-shrink-0">예상 한도</div>
                   <div className="px-5 py-3 font-bold text-kb-text">{previewResult.estimatedLimitAmt.toLocaleString('ko-KR')}원</div>
                 </div>
               )}
               {previewResult.estimatedRateBps != null && (
                 <div className="flex">
-                  <div className="w-36 px-5 py-3 bg-[#F0FAF7] font-medium text-kb-text flex-shrink-0">예상 금리</div>
+                  <div className="w-36 px-5 py-3 bg-kb-beige-light font-medium text-kb-text flex-shrink-0">예상 금리</div>
                   <div className="px-5 py-3 font-bold text-kb-text">연 {bpsToRateUtil(previewResult.estimatedRateBps)}%</div>
                 </div>
               )}
               {previewResult.creditGrade && (
                 <div className="flex">
-                  <div className="w-36 px-5 py-3 bg-[#F0FAF7] font-medium text-kb-text flex-shrink-0">신용등급</div>
+                  <div className="w-36 px-5 py-3 bg-kb-beige-light font-medium text-kb-text flex-shrink-0">신용등급</div>
                   <div className="px-5 py-3 text-kb-text-body">{previewResult.creditGrade}</div>
                 </div>
               )}
@@ -294,7 +294,7 @@ export default function LoanApplyPage() {
 
       {/* 약관 동의 */}
       <section className="mb-6">
-        <div className="border border-[#E2F5EF] p-6 bg-[#F0FAF7]">
+        <div className="border border-kb-border p-6 bg-kb-beige-light">
           <p className="text-[13px] text-kb-text-body leading-relaxed mb-3">
             · 본 대출 신청은 심사 후 승인 결과가 달라질 수 있습니다.<br />
             · 대출 거절 시 신용등급에 영향을 줄 수 있습니다.<br />
@@ -315,12 +315,12 @@ export default function LoanApplyPage() {
 
       <div className="flex justify-center gap-3">
         <Link href="/products/loan"
-          className="px-14 py-3 border border-[#E2F5EF] text-[14px] text-kb-text hover:bg-[#F0FAF7] transition-colors">
+          className="px-14 py-3 border border-kb-border text-[14px] text-kb-text hover:bg-kb-beige-light transition-colors">
           취소
         </Link>
         <button onClick={handleSubmit} disabled={!canSubmit}
           className={`px-14 py-3 text-[14px] font-bold transition-all ${
-            canSubmit ? 'bg-[#0D5C47] text-white hover:opacity-85' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+            canSubmit ? 'bg-kb-yellow text-kb-text hover:brightness-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
           {submitting ? '처리 중...' : '대출 신청하기'}
         </button>
       </div>
