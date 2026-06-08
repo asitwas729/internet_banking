@@ -35,19 +35,6 @@ const NAV: NavSection[] = [
     ],
   },
   {
-    // KYC·AML·제재·세무 심사.
-    section: '심사·컴플라이언스', dot: 'bg-orange-400',
-    bankRoles: HQ_DESK,
-    items: [
-      { label: '제재대상 Hit 검토', href: '/admin/screening' },
-      { label: 'EDD 심사·승인',    href: '/admin/edd' },
-      { label: '중복고객 검토',     href: '/admin/duplicates' },
-      { label: '대리인 검토',       href: '/admin/agent' },
-      { label: '미성년 검토',       href: '/admin/minor' },
-      { label: 'FATCA/CRS',        href: '/admin/fatca' },
-    ],
-  },
-  {
     section: '상담', dot: 'bg-teal-400',
     bankRoles: AUDIT_VIEW,
     items: [
@@ -78,6 +65,17 @@ const NAV: NavSection[] = [
       { label: '신용정보 보고서',href: '/admin/loan/credit-report' },
       { label: '알림 발송함',    href: '/admin/loan/notification' },
       { label: '본인인증 조회',  href: '/admin/loan/identity' },
+    ],
+  },
+  {
+    section: 'AI 심사지원', dot: 'bg-violet-400',
+    // RAG·자문·편향감사 관리 — 본사 심사·컴플라이언스 데스크(HQ_DESK).
+    bankRoles: HQ_DESK,
+    items: [
+      { label: 'RAG 문서관리',  href: '/admin/ai/rag-documents' },
+      { label: '자문 규칙',     href: '/admin/ai/advisory-rules' },
+      { label: '감사·리스크',   href: '/admin/ai/audit-risk' },
+      { label: '서류 검토 큐',  href: '/admin/ai/doc-review' },
     ],
   },
   {
