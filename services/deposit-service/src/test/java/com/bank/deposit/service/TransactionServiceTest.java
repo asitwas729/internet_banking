@@ -16,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.ArgumentCaptor;
 
+
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -45,11 +46,14 @@ class TransactionServiceTest {
     @Mock private TransactionRepository transactionRepository;
     @Mock private AccountRepository accountRepository;
     @Mock private Clock clock;
+    @Mock private IdempotentTransactionSaver idempotentTransactionSaver;
 
     @BeforeEach
     void setUpClock() {
         org.mockito.Mockito.lenient().when(clock.instant()).thenReturn(Instant.parse("2026-01-01T00:00:00Z"));
         org.mockito.Mockito.lenient().when(clock.getZone()).thenReturn(ZoneId.of("Asia/Seoul"));
+        org.mockito.Mockito.lenient().when(idempotentTransactionSaver.saveOrFetch(any(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Nested
@@ -125,11 +129,11 @@ class TransactionServiceTest {
         void transfer() {
             Account source = activeAccount(BigDecimal.valueOf(1_000_000));
             given(accountRepository.findByIdForUpdate(1L)).willReturn(Optional.of(source));
-            given(transactionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+
 
             Transaction result = transactionService.transfer(1L, null, "001-1234-5678",
                     BigDecimal.valueOf(300_000), TransferType.EXTERNAL,
-                    "001", "국민은행", "홍길동", TransactionChannel.INTERNET, "이체");
+                    "001", "국민은행", "홍길동", TransactionChannel.INTERNET, "이체", null);
 
             assertThat(result.getTransactionType()).isEqualTo(TransactionType.TRANSFER);
             assertThat(result.getDirectionType()).isEqualTo(DirectionType.OUT);
@@ -162,23 +166,27 @@ class TransactionServiceTest {
             given(accountRepository.findByIdForUpdate(2L)).willReturn(Optional.of(target));
             given(transactionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
 
+
             Transaction result = transactionService.transfer(1L, 2L, "ACC-002",
                     BigDecimal.valueOf(300_000), TransferType.INTERNAL,
-                    "001", "우리은행", "김수신", TransactionChannel.MOBILE, "내부 이체");
+                    "001", "우리은행", "김수신", TransactionChannel.MOBILE, "내부 이체", null);
 
-            ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
-            then(transactionRepository).should(org.mockito.Mockito.times(2)).save(captor.capture());
-            List<Transaction> saved = captor.getAllValues();
+            // OUT 거래는 saveOrFetch, IN 거래는 transactionRepository.save
+            ArgumentCaptor<Transaction> outCaptor = ArgumentCaptor.forClass(Transaction.class);
+            then(idempotentTransactionSaver).should(org.mockito.Mockito.times(1)).saveOrFetch(outCaptor.capture(), any(), any());
+            ArgumentCaptor<Transaction> inCaptor = ArgumentCaptor.forClass(Transaction.class);
+            then(transactionRepository).should(org.mockito.Mockito.times(1)).save(inCaptor.capture());
+            Transaction outTx = outCaptor.getValue();
+            Transaction inTx = inCaptor.getValue();
 
             assertThat(result.getDirectionType()).isEqualTo(DirectionType.OUT);
             assertThat(source.getBalance()).isEqualByComparingTo("700000");
             assertThat(target.getBalance()).isEqualByComparingTo("500000");
-            assertThat(saved)
-                    .extracting(Transaction::getDirectionType)
-                    .containsExactly(DirectionType.OUT, DirectionType.IN);
-            assertThat(saved.get(1).getTransferType()).isEqualTo(TransferType.INTERNAL);
-            assertThat(saved.get(1).getChannelType()).isEqualTo(TransactionChannel.SYSTEM);
-            assertThat(saved.get(1).getTransactionSummary()).isEqualTo("이체 수신");
+            assertThat(outTx.getDirectionType()).isEqualTo(DirectionType.OUT);
+            assertThat(inTx.getDirectionType()).isEqualTo(DirectionType.IN);
+            assertThat(inTx.getTransferType()).isEqualTo(TransferType.INTERNAL);
+            assertThat(inTx.getChannelType()).isEqualTo(TransactionChannel.SYSTEM);
+            assertThat(inTx.getTransactionSummary()).isEqualTo("이체 수신");
         }
 
         @Test
@@ -188,7 +196,7 @@ class TransactionServiceTest {
             given(accountRepository.findByIdForUpdate(1L)).willReturn(Optional.of(source));
 
             assertThatThrownBy(() -> transactionService.transfer(1L, 2L, null,
-                    BigDecimal.valueOf(1_000_000), null, null, null, null, null, null))
+                    BigDecimal.valueOf(1_000_000), null, null, null, null, null, null, null))
                     .isInstanceOf(BusinessException.class);
         }
 
@@ -197,7 +205,7 @@ class TransactionServiceTest {
         void internalTransferWithNullToAccountId() {
             assertThatThrownBy(() -> transactionService.transfer(1L, null, null,
                     BigDecimal.valueOf(100_000), TransferType.INTERNAL,
-                    null, null, null, null, null))
+                    null, null, null, null, null, null))
                     .isInstanceOf(BusinessException.class);
         }
 
@@ -208,7 +216,7 @@ class TransactionServiceTest {
 
             assertThatThrownBy(() -> transactionService.transfer(99L, null, "001-0000-0001",
                     BigDecimal.valueOf(100_000), TransferType.EXTERNAL,
-                    "001", "국민은행", "수취인", TransactionChannel.INTERNET, "이체"))
+                    "001", "국민은행", "수취인", TransactionChannel.INTERNET, "이체", null))
                     .isInstanceOf(BusinessException.class);
         }
 
@@ -219,7 +227,7 @@ class TransactionServiceTest {
 
             assertThatThrownBy(() -> transactionService.transfer(1L, null, "001-0000-0001",
                     BigDecimal.valueOf(100_000), TransferType.EXTERNAL,
-                    "001", "국민은행", "수취인", TransactionChannel.INTERNET, "이체"))
+                    "001", "국민은행", "수취인", TransactionChannel.INTERNET, "이체", null))
                     .isInstanceOf(BusinessException.class);
         }
 
@@ -241,7 +249,7 @@ class TransactionServiceTest {
 
             assertThatThrownBy(() -> transactionService.transfer(1L, 2L, "ACC-WRONG",
                     BigDecimal.valueOf(100_000), TransferType.INTERNAL,
-                    null, null, null, TransactionChannel.INTERNET, "이체"))
+                    null, null, null, TransactionChannel.INTERNET, "이체", null))
                     .isInstanceOf(BusinessException.class);
         }
 
@@ -250,11 +258,11 @@ class TransactionServiceTest {
         void externalTransferDeductsCorrectly() {
             Account source = activeAccount(BigDecimal.valueOf(500_000));
             given(accountRepository.findByIdForUpdate(1L)).willReturn(Optional.of(source));
-            given(transactionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+
 
             transactionService.transfer(1L, null, "302-1234-5678",
                     BigDecimal.valueOf(150_000), TransferType.EXTERNAL,
-                    "SHB", "신한은행", "이수신", TransactionChannel.INTERNET, "타행 이체");
+                    "SHB", "신한은행", "이수신", TransactionChannel.INTERNET, "타행 이체", null);
 
             assertThat(source.getBalance()).isEqualByComparingTo("350000");
         }
@@ -345,11 +353,11 @@ class TransactionServiceTest {
         void transferExactBalance() {
             Account source = activeAccount(BigDecimal.valueOf(300_000));
             given(accountRepository.findByIdForUpdate(1L)).willReturn(Optional.of(source));
-            given(transactionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+
 
             transactionService.transfer(1L, null, "ACC-002",
                     BigDecimal.valueOf(300_000), TransferType.EXTERNAL,
-                    "001", "국민은행", "수취인", TransactionChannel.INTERNET, "전액 이체");
+                    "001", "국민은행", "수취인", TransactionChannel.INTERNET, "전액 이체", null);
 
             assertThat(source.getBalance()).isEqualByComparingTo("0");
         }
@@ -359,14 +367,14 @@ class TransactionServiceTest {
         void sequentialTransferBalance() {
             Account source = activeAccount(BigDecimal.valueOf(1_000_000));
             given(accountRepository.findByIdForUpdate(1L)).willReturn(Optional.of(source));
-            given(transactionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+
 
             transactionService.transfer(1L, null, "ACC-A",
                     BigDecimal.valueOf(300_000), TransferType.EXTERNAL,
-                    "001", "국민은행", "수취인A", TransactionChannel.INTERNET, "이체1");
+                    "001", "국민은행", "수취인A", TransactionChannel.INTERNET, "이체1", null);
             transactionService.transfer(1L, null, "ACC-B",
                     BigDecimal.valueOf(200_000), TransferType.EXTERNAL,
-                    "002", "신한은행", "수취인B", TransactionChannel.INTERNET, "이체2");
+                    "002", "신한은행", "수취인B", TransactionChannel.INTERNET, "이체2", null);
 
             assertThat(source.getBalance()).isEqualByComparingTo("500000");
         }
