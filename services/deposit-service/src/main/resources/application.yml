@@ -36,6 +36,10 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
     out-of-order: false
+    placeholders:
+      # 데모 계좌·잔액 시드(V14) 실행 여부. 운영/스테이징에서는 false 유지.
+      # local 프로파일에서만 true 로 덮어써서 시드가 적용된다.
+      seedDemoData: false
 
 management:
   endpoints:

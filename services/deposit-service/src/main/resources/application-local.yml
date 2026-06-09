@@ -8,6 +8,9 @@ spring:
   flyway:
     repair-on-migrate: true
     validate-on-migrate: false
+    placeholders:
+      # 로컬에서만 데모 계좌·잔액 시드(V14)를 실제로 실행한다.
+      seedDemoData: true
 
 logging:
   level:
