@@ -955,7 +955,7 @@ export default function ChatbotWidget() {
       const result = await executeChatbotFeature(featureCode, {
         customer_no: customerNo.trim() || getCurrentDepositCustomerId(),
         query: userText,
-        product_type: featureCode === 'PRODUCT_GUIDE' ? inferProductType(userText) : undefined,
+        product_type: undefined,
         chatbot_consultation_id: consultationId ?? undefined,
       })
       if (replaceMessages) {
