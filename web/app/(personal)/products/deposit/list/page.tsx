@@ -7,7 +7,7 @@ import { useSearchParams } from 'next/navigation'
 import CartModal from '@/components/products/CartModal'
 import DepositSidebar from '@/components/products/DepositSidebar'
 import AutoBreadcrumb from '@/components/layout/AutoBreadcrumb'
-import { fetchDepositProducts, getDepositSlugByProductId, toDepositProductCard } from '@/lib/deposit-api'
+import { fetchDepositProducts, toDepositProductCard } from '@/lib/deposit-api'
 
 type Product = {
   id: string
@@ -259,7 +259,7 @@ const DEPOSIT_PRODUCT_TYPES = ['전체', '정기예금', '지수연동예금', '
 const JOIN_METHODS = ['전체', '인터넷뱅킹', 'AXful Next', '영업점']
 const JOIN_PERIODS = ['전체', '3개월 미만', '3-6개월 미만', '6-12개월 미만', '12-24개월 미만', '24개월 이상']
 
-function DepositListContent() {
+function DepositListPageInner() {
   const searchParams = useSearchParams()
   const [tab, setTab] = useState<Tab>('예금')
   const [apiProductsMap, setApiProductsMap] = useState<Partial<Record<Tab, Product[]>>>({})
@@ -287,11 +287,10 @@ function DepositListContent() {
 
         products.forEach(product => {
           const card = toDepositProductCard(product)
-          const slug = getDepositSlugByProductId(product.productId, product.productName)
           if (product.productType === 'SUBSCRIPTION') {
             next['주택청약']?.push(card)
           } else if (product.productType === 'SAVINGS') {
-            if (['axful-soldier', 'axful-work', 'axful-dream', 'axful-together'].includes(slug)) {
+            if (product.savingType === 'REGULAR') {
               next['정기적금']?.push(card)
             } else {
               next['자유적금']?.push(card)
@@ -527,9 +526,6 @@ function DepositListContent() {
 }
 
 export default function DepositListPage() {
-  return (
-    <Suspense fallback={null}>
-      <DepositListContent />
-    </Suspense>
-  )
+  return <Suspense><DepositListPageInner /></Suspense>
+
 }
