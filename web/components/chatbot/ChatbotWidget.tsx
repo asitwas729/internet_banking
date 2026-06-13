@@ -653,8 +653,8 @@ export default function ChatbotWidget() {
       const now = new Date()
       const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate())
       const recent = txs.filter(t => new Date(t.transactionAt ?? '') >= threeMonthsAgo)
-      monthlyIncome  = recent.filter(t => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0) / 3
-      monthlyExpense = recent.filter(t => Number(t.amount) < 0).reduce((s, t) => s + Math.abs(Number(t.amount)), 0) / 3
+      monthlyIncome  = recent.filter(t => t.directionType === 'IN').reduce((s, t) => s + Number(t.amount), 0) / 3
+      monthlyExpense = recent.filter(t => t.directionType === 'OUT').reduce((s, t) => s + Number(t.amount), 0) / 3
       txFrequency    = recent.length / 3
     } catch {}
 
@@ -683,7 +683,7 @@ export default function ChatbotWidget() {
     const EXCLUDE = ['군인', '장병', '군무원', '사병', '병사']
     const YOUTH_KEYWORDS = ['청년도약', '청년우대', '청년 우대', '청년주택', '청년 주택']
     const allProducts = await fetchDepositProducts(params.productType ? { productType: params.productType } : undefined)
-    const candidates = allProducts.filter(p => {
+    const baseFilter = (p: (typeof allProducts)[0]) => {
       if (p.productStatus && p.productStatus !== 'SELLING') return false
       if (p.productType === 'SUBSCRIPTION' && params.productType !== 'SUBSCRIPTION') return false
       const nd = `${p.productName} ${p.description ?? ''}`
@@ -692,19 +692,18 @@ export default function ChatbotWidget() {
       // 1순위: DB targetGroups의 minAge/maxAge로 나이 체크
       const hasAgeRestriction = p.targetGroups?.some(tg => tg.minAge != null || tg.maxAge != null) ?? false
       if (customerAge !== null && hasAgeRestriction) {
-        // 나이 제한 있는 그룹 중 하나라도 고객이 속하면 통과
         const eligible = p.targetGroups!.some(tg => {
-          if (tg.minAge == null && tg.maxAge == null) return true // 제한 없는 그룹
+          if (tg.minAge == null && tg.maxAge == null) return true
           const okMin = tg.minAge == null || customerAge! >= tg.minAge
           const okMax = tg.maxAge == null || customerAge! <= tg.maxAge
           return okMin && okMax
         })
         if (!eligible) return false
       }
-      // 2순위: 키워드 fallback — DB 나이 제한 없거나 나이 조회 실패 시 항상 적용
+      // 2순위: 키워드 fallback
       if (YOUTH_KEYWORDS.some(k => nd.includes(k))) {
-        if (customerAge === null) return false        // 나이 모르면 청년 상품 전체 제외
-        if (!hasAgeRestriction && customerAge > 34) return false  // DB 제한 없는데 키워드 있으면 나이로 판단
+        if (customerAge === null) return false
+        if (!hasAgeRestriction && customerAge > 34) return false
       }
 
       const minAmt = Number(p.minJoinAmount ?? 0)
@@ -712,12 +711,18 @@ export default function ChatbotWidget() {
         if (p.productType === 'DEPOSIT' && totalBalance   > 0 && minAmt > totalBalance)       return false
         if (p.productType === 'SAVINGS' && monthlySurplus > 0 && minAmt > monthlySurplus * 2) return false
       }
-      if (params.minRate != null && params.minRate > 0) {
-        const rate = Number(p.bestRate ?? p.baseInterestRate ?? 0)
-        if (rate < params.minRate) return false
-      }
       return true
-    })
+    }
+    const baseProducts = allProducts.filter(baseFilter)
+    let rateFilterRelaxed = false
+    let candidates = params.minRate != null && params.minRate > 0
+      ? baseProducts.filter(p => Number(p.bestRate ?? p.baseInterestRate ?? 0) >= params.minRate!)
+      : baseProducts
+    // 금리 조건이 너무 엄격해 결과가 없으면 금리 필터 없이 재시도
+    if (candidates.length === 0 && params.minRate != null && params.minRate > 0) {
+      candidates = baseProducts
+      rateFilterRelaxed = true
+    }
 
     const maxInterest = Math.max(1, ...candidates.map(p => {
       const r = Number(p.bestRate ?? p.baseInterestRate ?? 0) / 100
@@ -823,9 +828,10 @@ export default function ChatbotWidget() {
 
     const resultRows = await toRows(top3)
 
+    const rateNote = rateFilterRelaxed ? `\n⚠️ 금리 ${params.minRate}% 이상 조건에 맞는 상품이 없어 전체 상품 중 추천합니다.` : ''
     const diagnosisMsg = isAccumulateType
-      ? `📌 고객님 진단: 저축 성장형\n연 저축 가능액 ${Math.round(monthlySurplus * 12 / 10000)}만원 > 현재 잔액 ${Math.round(totalBalance / 10000)}만원으로, 목돈을 만드는 적금이 더 유리합니다.`
-      : `📌 고객님 진단: 목돈 운용형\n현재 잔액 ${Math.round(totalBalance / 10000)}만원으로 목돈을 안정적으로 굴리는 예금이 더 유리합니다.`
+      ? `📌 고객님 진단: 저축 성장형\n연 저축 가능액 ${Math.round(monthlySurplus * 12 / 10000)}만원 > 현재 잔액 ${Math.round(totalBalance / 10000)}만원으로, 목돈을 만드는 적금이 더 유리합니다.${rateNote}`
+      : `📌 고객님 진단: 목돈 운용형\n현재 잔액 ${Math.round(totalBalance / 10000)}만원으로 목돈을 안정적으로 굴리는 예금이 더 유리합니다.${rateNote}`
 
     return {
       ...buildFeatureResult('PRODUCT_SEARCH_COMPARE', diagnosisMsg, []),
@@ -1268,7 +1274,7 @@ export default function ChatbotWidget() {
 
     // X%이상 상품 보여줘 패턴 처리 (예: "3%이상 상품", "금리 2% 이상 상품들")
     const rateFilterMatch = trimmed.match(/([0-9]+(?:\.[0-9]+)?)\s*%\s*이상/)
-    if (rateFilterMatch && ['상품', '보여줘', '보여주', '추천', '알려'].some(w => trimmed.includes(w))) {
+    if (rateFilterMatch && ['상품', '보여줘', '보여주', '보여달', '추천', '알려'].some(w => trimmed.includes(w))) {
       const minRate = Number(rateFilterMatch[1])
       setLoading(true)
       setExpandedRow(null)
