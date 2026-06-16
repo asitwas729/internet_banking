@@ -43,9 +43,10 @@ class ChunkSizeRetrievalEvalTest {
     private static final String MODEL = "text-embedding-3-small";
     private static final int    DIM   = 1536;
 
-    /** 스윕할 청크 크기(문자). overlap 은 운영 설정대로 100 고정. */
+    /** 스윕할 청크 크기(문자)와 overlap(문자) — 2D 그리드. */
     private static final int[] CHUNK_SIZES = {400, 600, 800, 1000, 1200};
-    private static final int   OVERLAP     = 100;
+    private static final int[] OVERLAPS    = {0, 50, 100, 150};
+    private static final int   OVERLAP     = 100;  // plumbing/참조용 운영 기본값
 
     private static final int K  = 5;   // 주 지표 cutoff
     private static final int K2 = 10;  // 보조 Recall cutoff
@@ -190,52 +191,69 @@ class ChunkSizeRetrievalEvalTest {
         List<int[]> goldSpans = resolved.goldSpans();
         assertThat(usableQueries).as("골드 섹션이 해석된 질의").hasSizeGreaterThanOrEqualTo(10);
 
-        // 질의 임베딩(크기 무관 — 1회)
+        // 질의 임베딩(크기·overlap 무관 — 1회)
         float[][] queryVecs = embedAll(usableQueries.stream().map(Q::query).toList());
 
         System.out.println();
-        System.out.println("================ 청크 크기별 검색 품질 (OpenAI " + MODEL + ", " + DIM + "d) ================");
-        System.out.println("코퍼스: " + DOC_RELATIVE + " (" + content.length() + "자), 질의 " + usableQueries.size()
-                + "개, overlap " + OVERLAP);
-        System.out.printf("%-8s | %8s | %9s | %8s | %8s | %8s | %8s%n",
-                "크기", "청크수", "평균자수", "Recall@5", "MRR@5", "nDCG@5", "Recall@10");
-        System.out.println("---------+----------+-----------+----------+----------+----------+----------");
+        System.out.println("======== 청크 크기 × overlap 검색 품질 (OpenAI " + MODEL + ", " + DIM + "d) ========");
+        System.out.println("코퍼스: " + DOC_RELATIVE + " (" + content.length() + "자), 질의 " + usableQueries.size() + "개");
+        System.out.printf("%-6s | %-8s | %7s | %8s | %8s | %8s | %8s%n",
+                "크기", "overlap", "청크수", "Recall@5", "MRR@5", "nDCG@5", "Recall@10");
+        System.out.println("-------+----------+---------+----------+----------+----------+----------");
 
+        double[][] mrrGrid = new double[CHUNK_SIZES.length][OVERLAPS.length];
         double bestMrr = 0;
-        int bestSize = CHUNK_SIZES[0];
+        int bestSize = CHUNK_SIZES[0], bestOverlap = OVERLAPS[0];
 
-        for (int size : CHUNK_SIZES) {
-            List<Chunk> chunks = chunk(content, size, OVERLAP);
-            float[][] chunkVecs = embedAll(chunks.stream().map(Chunk::text).toList());
+        for (int si = 0; si < CHUNK_SIZES.length; si++) {
+            for (int oi = 0; oi < OVERLAPS.length; oi++) {
+                int size = CHUNK_SIZES[si], overlap = OVERLAPS[oi];
+                List<Chunk> chunks = chunk(content, size, overlap);
+                float[][] chunkVecs = embedAll(chunks.stream().map(Chunk::text).toList());
 
-            double sumRecall5 = 0, sumMrr5 = 0, sumNdcg5 = 0, sumRecall10 = 0;
-            for (int qi = 0; qi < usableQueries.size(); qi++) {
-                int[] gold = goldSpans.get(qi);
-                int[] ranked = rankChunks(queryVecs[qi], chunkVecs); // 청크 인덱스, 코사인 내림차순
+                double sumRecall5 = 0, sumMrr5 = 0, sumNdcg5 = 0, sumRecall10 = 0;
+                for (int qi = 0; qi < usableQueries.size(); qi++) {
+                    int[] gold = goldSpans.get(qi);
+                    int[] ranked = rankChunks(queryVecs[qi], chunkVecs);
 
-                int totalRelevant = 0;
-                for (Chunk c : chunks) if (overlaps(c, gold)) totalRelevant++;
+                    int totalRelevant = 0;
+                    for (Chunk c : chunks) if (overlaps(c, gold)) totalRelevant++;
 
-                sumRecall5  += recallAtK(ranked, chunks, gold, K)  ? 1 : 0;
-                sumRecall10 += recallAtK(ranked, chunks, gold, K2) ? 1 : 0;
-                sumMrr5     += reciprocalRank(ranked, chunks, gold, K);
-                sumNdcg5    += ndcgAtK(ranked, chunks, gold, K, totalRelevant);
+                    sumRecall5  += recallAtK(ranked, chunks, gold, K)  ? 1 : 0;
+                    sumRecall10 += recallAtK(ranked, chunks, gold, K2) ? 1 : 0;
+                    sumMrr5     += reciprocalRank(ranked, chunks, gold, K);
+                    sumNdcg5    += ndcgAtK(ranked, chunks, gold, K, totalRelevant);
+                }
+                int n = usableQueries.size();
+                double recall5 = sumRecall5 / n, mrr5 = sumMrr5 / n, ndcg5 = sumNdcg5 / n, recall10 = sumRecall10 / n;
+                mrrGrid[si][oi] = mrr5;
+
+                System.out.printf("%-6d | %-8d | %7d | %8.3f | %8.3f | %8.3f | %8.3f%n",
+                        size, overlap, chunks.size(), recall5, mrr5, ndcg5, recall10);
+
+                if (mrr5 > bestMrr) { bestMrr = mrr5; bestSize = size; bestOverlap = overlap; }
             }
-            int n = usableQueries.size();
-            double recall5 = sumRecall5 / n, mrr5 = sumMrr5 / n, ndcg5 = sumNdcg5 / n, recall10 = sumRecall10 / n;
-            double avgChars = chunks.stream().mapToInt(c -> c.text().length()).average().orElse(0);
-
-            System.out.printf("%-8d | %8d | %9.0f | %8.3f | %8.3f | %8.3f | %8.3f%n",
-                    size, chunks.size(), avgChars, recall5, mrr5, ndcg5, recall10);
-
-            if (mrr5 > bestMrr) { bestMrr = mrr5; bestSize = size; }
+            if (si < CHUNK_SIZES.length - 1) System.out.println("       |          |         |          |          |          |");
         }
-        System.out.println("=========================================================================================");
-        System.out.println("MRR@5 최적 청크 크기: " + bestSize + "자 (현재 운영값 800자와 비교)");
+
+        // MRR@5 매트릭스 (행=크기, 열=overlap)
+        System.out.println();
+        System.out.println("MRR@5 매트릭스 (행=크기, 열=overlap)");
+        System.out.printf("%-8s", "크기\\ov");
+        for (int ov : OVERLAPS) System.out.printf(" | %6d", ov);
+        System.out.println();
+        for (int si = 0; si < CHUNK_SIZES.length; si++) {
+            System.out.printf("%-8d", CHUNK_SIZES[si]);
+            for (int oi = 0; oi < OVERLAPS.length; oi++) System.out.printf(" | %6.3f", mrrGrid[si][oi]);
+            System.out.println();
+        }
+        System.out.println("============================================================================");
+        System.out.printf("MRR@5 최적: 크기 %d자 / overlap %d (MRR@5=%.3f) — 현재 운영값 800/100 과 비교%n",
+                bestSize, bestOverlap, bestMrr);
         System.out.println();
 
         // 와이어링/모델 정상성만 느슨하게 검증 — 절대 수치는 단정하지 않음
-        assertThat(bestMrr).as("최적 청크 크기의 MRR@5 (검색 동작 정상성)").isGreaterThan(0.2);
+        assertThat(bestMrr).as("최적 (크기,overlap) 의 MRR@5 (검색 동작 정상성)").isGreaterThan(0.2);
     }
 
     /**
