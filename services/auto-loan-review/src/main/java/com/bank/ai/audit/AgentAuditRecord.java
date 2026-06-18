@@ -80,7 +80,7 @@ public record AgentAuditRecord(
     private static final class LogHolder {}
 
     /** SHA-256(input, UTF-8) → 소문자 hex 64자. SHA-256 은 JVM 표준 보장이므로 예외 도달 불가. */
-    static String sha256Hex(String input) {
+    public static String sha256Hex(String input) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
