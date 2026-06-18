@@ -1,5 +1,6 @@
 package com.bank.loan.advisory.rag;
 
+import com.bank.loan.advisory.observability.AdvisoryMetrics;
 import com.bank.loan.advisory.repository.AdvisoryCaseIndexRepository;
 import com.bank.loan.review.domain.LoanReview;
 import com.bank.loan.review.repository.LoanReviewRepository;
@@ -40,6 +41,7 @@ public class CaseIndexBackfillService {
     private final AdvisoryCaseIndexRepository caseIndexRepo;
     private final EmbeddingClient             embeddingClient;
     private final JdbcTemplate                jdbcTemplate;
+    private final AdvisoryMetrics             advisoryMetrics;
 
     // ── 공개 API ─────────────────────────────────────────────────────────────
 
@@ -73,6 +75,7 @@ public class CaseIndexBackfillService {
                 // 멱등: 이미 동일 revId 가 인덱스에 있으면 건너뜀
                 if (caseIndexRepo.existsByRevId(revId)) {
                     skipped++;
+                    advisoryMetrics.incrementBackfillSkipped();
                     continue;
                 }
 
@@ -89,8 +92,10 @@ public class CaseIndexBackfillService {
                     persistIndex(revId, review.getRevDecisionCd(), summaryText,
                                  vec, modelCd, actorId);
                     processed++;
+                    advisoryMetrics.incrementBackfillProcessed();
                 } catch (Exception e) {
                     failed++;
+                    advisoryMetrics.incrementBackfillFailed();
                     log.warn("[backfill] revId={} 실패: {}", revId, e.getMessage());
                 }
             }
