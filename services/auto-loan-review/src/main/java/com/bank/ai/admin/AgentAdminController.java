@@ -15,6 +15,11 @@ public class AgentAdminController {
 
     private final AgentAdminService adminService;
 
+    @GetMapping("/status")
+    public AgentStatusResponse getStatus() {
+        return adminService.buildStatus();
+    }
+
     @GetMapping("/audit/{revId}")
     public AgentAuditRecord getAuditLog(@PathVariable Long revId) {
         return adminService.getAuditLog(revId);

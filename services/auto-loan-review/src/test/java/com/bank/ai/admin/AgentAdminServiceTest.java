@@ -5,18 +5,28 @@ import com.bank.ai.agent.FallbackReason;
 import com.bank.ai.agent.PreReviewAgentService;
 import com.bank.ai.agent.RiskLevel;
 import com.bank.ai.audit.AgentAuditRecord;
+import com.bank.ai.audit.AuditLogProperties;
 import com.bank.ai.audit.AuditLogService;
+import com.bank.ai.drift.DriftProperties;
+import com.bank.ai.llm.config.AgentProperties;
+import com.bank.ai.llm.config.LlmProperties;
+import com.bank.ai.llm.support.LlmRequestRateMeter;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.dto.AutoReviewResponse;
 import com.bank.ai.review.service.AutoReviewService;
 import com.bank.ai.rule.domain.Track;
 import com.bank.ai.rule.domain.TrackDecision;
 import com.bank.ai.rule.service.TrackClassifier;
+import com.bank.ai.shadow.ShadowRunProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -42,15 +52,17 @@ class AgentAdminServiceTest {
     @Mock TrackClassifier trackClassifier;
     @Mock PreReviewAgentService agentService;
     @Mock AdminActionAuditService actionAuditService;
+    @Mock AgentProperties agentProperties;
+    @Mock LlmProperties llmProperties;
+    @Mock LlmRequestRateMeter rateMeter;
+    @Mock AuditLogProperties auditLogProperties;
+    @Mock ShadowRunProperties shadowRunProperties;
+    @Mock DriftProperties driftProperties;
+    @Spy  MeterRegistry meterRegistry = new SimpleMeterRegistry();
+    @Spy  ObjectMapper objectMapper = new ObjectMapper();
 
-    private AgentAdminService service;
-
-    @BeforeEach
-    void setUp() {
-        service = new AgentAdminService(
-                auditLogService, autoReviewService, trackClassifier,
-                agentService, actionAuditService, new ObjectMapper());
-    }
+    @InjectMocks
+    AgentAdminService service;
 
     // ── getAuditLog ───────────────────────────────────────────────────────────
 

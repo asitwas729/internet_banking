@@ -3,13 +3,21 @@ package com.bank.ai.admin;
 import com.bank.ai.agent.AgentOpinion;
 import com.bank.ai.agent.PreReviewAgentService;
 import com.bank.ai.audit.AgentAuditRecord;
+import com.bank.ai.audit.AuditLogProperties;
 import com.bank.ai.audit.AuditLogService;
+import com.bank.ai.drift.DriftProperties;
+import com.bank.ai.llm.config.AgentProperties;
+import com.bank.ai.llm.config.LlmProperties;
+import com.bank.ai.llm.support.LlmRequestRateMeter;
 import com.bank.ai.review.dto.AutoReviewRequest;
 import com.bank.ai.review.dto.AutoReviewResponse;
 import com.bank.ai.review.service.AutoReviewService;
 import com.bank.ai.rule.domain.TrackDecision;
 import com.bank.ai.rule.service.TrackClassifier;
+import com.bank.ai.shadow.ShadowRunProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -29,6 +37,13 @@ public class AgentAdminService {
     private final PreReviewAgentService agentService;
     private final AdminActionAuditService actionAuditService;
     private final ObjectMapper objectMapper;
+    private final AgentProperties agentProperties;
+    private final LlmProperties llmProperties;
+    private final LlmRequestRateMeter rateMeter;
+    private final AuditLogProperties auditLogProperties;
+    private final ShadowRunProperties shadowRunProperties;
+    private final DriftProperties driftProperties;
+    private final MeterRegistry meterRegistry;
 
     public AgentAuditRecord getAuditLog(Long revId) {
         try {
@@ -85,5 +100,28 @@ public class AgentAdminService {
             actionAuditService.record(AdminActionAuditRecord.failure(ACTOR, "REPLAY_DRY_RUN", revId, e.getReason()));
             throw e;
         }
+    }
+
+    /** 에이전트 런타임 상태 스냅샷 반환. */
+    public AgentStatusResponse buildStatus() {
+        actionAuditService.record(AdminActionAuditRecord.success(ACTOR, "QUERY_STATUS", null));
+        return new AgentStatusResponse(
+                agentProperties.enabled(),
+                rateMeter.getRpmRemaining(),
+                rateMeter.getRpdRemaining(),
+                sumCounters("ai.agent.runs.total"),
+                sumCounters("ai.agent.fallback.total"),
+                sumCounters("ai.agent.disagreement.total"),
+                llmProperties.model(),
+                auditLogProperties.promptVersion(),
+                shadowRunProperties.enabled(),
+                driftProperties.enabled()
+        );
+    }
+
+    private long sumCounters(String name) {
+        return (long) meterRegistry.find(name).counters().stream()
+                .mapToDouble(Counter::count)
+                .sum();
     }
 }
