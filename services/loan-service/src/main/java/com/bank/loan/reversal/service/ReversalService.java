@@ -3,17 +3,27 @@ package com.bank.loan.reversal.service;
 import com.bank.common.audit.StatusChangeEvent;
 import com.bank.common.audit.StatusHistoryPublisher;
 import com.bank.common.persistence.CurrentActorProvider;
+import com.bank.common.security.crypto.CryptoService;
 import com.bank.common.web.BusinessException;
+import com.bank.loan.payment.SystemAccountProvider;
+import com.bank.loan.payment.client.PaymentServiceClient;
+import com.bank.loan.payment.client.dto.PaymentRequest;
+import com.bank.loan.payment.client.dto.PaymentResponse;
 import com.bank.loan.repayment.domain.RepaymentTransaction;
 import com.bank.loan.repayment.repository.RepaymentTransactionRepository;
+import com.bank.loan.repaymentaccount.domain.RepaymentAccount;
+import com.bank.loan.repaymentaccount.repository.RepaymentAccountRepository;
 import com.bank.loan.reversal.dto.ReverseRepaymentRequest;
 import com.bank.loan.reversal.dto.ReversalResponse;
 import com.bank.loan.schedule.domain.RepaymentSchedule;
 import com.bank.loan.schedule.repository.RepaymentScheduleRepository;
 import com.bank.loan.support.LoanErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -57,9 +67,14 @@ public class ReversalService {
     private static final String REASON_REVERSED = "REPAYMENT_REVERSED";
     private static final String REASON_PREPAY_REVERSED = "PREPAY_REVERSED";
     private static final String DEFAULT_CHANNEL = "MANUAL";
+    private static final String CHANNEL_OPEN_BANKING = "OPEN_BANKING";
 
     private final RepaymentTransactionRepository txRepository;
     private final RepaymentScheduleRepository scheduleRepository;
+    private final RepaymentAccountRepository repaymentAccountRepository;
+    private final PaymentServiceClient paymentServiceClient;
+    private final SystemAccountProvider systemAccountProvider;
+    private final CryptoService cryptoService;
     private final StatusHistoryPublisher statusHistoryPublisher;
     private final CurrentActorProvider currentActor;
 
@@ -91,12 +106,14 @@ public class ReversalService {
                     "target is itself a reversal row");
         }
 
-        // 3) 중복 reversal 차단
+        // 3) 중복 reversal 차단 (빠른 사전 검사 — 실제 동시성 차단은 reversal row INSERT 시
+        //    부분 UNIQUE 인덱스(ux_rtx_active_reversal_target)가 담당한다)
         if (txRepository.existsActiveReversal(target.getRtxId())) {
             throw new BusinessException(LoanErrorCode.LOAN_097);
         }
 
-        // 4) 타입 분기
+        // 4) 타입 분기 — 각 분기는 reversal row 를 INSERT+flush 한 뒤에만 환급 이체를 실행한다.
+        //    (환급보다 row 를 먼저 확정해야 UNIQUE 제약이 동시/중복 요청의 이중 환급을 막는다)
         return switch (target.getRtxTypeCd()) {
             case RepaymentTransaction.TYPE_SCHEDULED -> reverseScheduled(target, req, idempotencyKey);
             case RepaymentTransaction.TYPE_EARLY     -> reverseEarly(target, req, idempotencyKey);
@@ -108,6 +125,7 @@ public class ReversalService {
     private ReversalResponse reverseScheduled(RepaymentTransaction target, ReverseRepaymentRequest req,
                                               String idempotencyKey) {
         RepaymentTransaction reversal = saveReversalRow(target, idempotencyKey);
+        refundIfNeeded(target);
 
         Long restoredRschId = null;
         if (target.getRschId() != null) {
@@ -179,8 +197,9 @@ public class ReversalService {
                 .filter(s -> RepaymentSchedule.STATUS_SUPERSEDED.equals(s.currentStatus()))
                 .toList();
 
-        // 5) 새 reversal row 저장
+        // 5) 새 reversal row 저장 (+flush) 후 환급 — 환급보다 row 를 먼저 확정한다
         RepaymentTransaction reversal = saveReversalRow(target, idempotencyKey);
+        refundIfNeeded(target);
 
         // 6) V_new 회차들 → SUPERSEDED (publish per row)
         int supersededCount = 0;
@@ -215,27 +234,87 @@ public class ReversalService {
         return ReversalResponse.ofEarly(reversal, vNew, supersededCount, vPrev, restoredCount);
     }
 
+    /**
+     * reversal row 를 INSERT 하고 즉시 flush 한다.
+     * 부분 UNIQUE 인덱스(ux_rtx_active_reversal_target) 위반 시 — 동시/중복 요청이 이미 활성
+     * 역분개를 만든 경우 — LOAN_097 로 변환해 이중 환급을 DB 레벨에서 차단한다.
+     */
     private RepaymentTransaction saveReversalRow(RepaymentTransaction target, String idempotencyKey) {
         OffsetDateTime now = OffsetDateTime.now();
-        return txRepository.save(RepaymentTransaction.builder()
-                .cntrId(target.getCntrId())
-                .rschId(target.getRschId())
-                .rtxTypeCd(RepaymentTransaction.TYPE_REVERSAL)
-                .totalAmount(target.getTotalAmount())
-                .principalAmount(target.getPrincipalAmount())
-                .interestAmount(target.getInterestAmount())
-                .overdueInterestAmount(target.getOverdueInterestAmount())
-                .feeAmount(target.getFeeAmount())
-                .currencyCd(target.getCurrencyCd())
-                .channelCd(DEFAULT_CHANNEL)
-                .rtxStatusCd(RepaymentTransaction.STATUS_SUCCESS)
-                .paidAt(now)
-                .valueDate(null)
-                .balanceAfter(null)
-                .idempotencyKey(idempotencyKey)
-                .reversalYn(RepaymentTransaction.YN_Y)
-                .reversalTargetRtxId(target.getRtxId())
-                .build());
+        try {
+            return txRepository.saveAndFlush(RepaymentTransaction.builder()
+                    .cntrId(target.getCntrId())
+                    .rschId(target.getRschId())
+                    .rtxTypeCd(RepaymentTransaction.TYPE_REVERSAL)
+                    .totalAmount(target.getTotalAmount())
+                    .principalAmount(target.getPrincipalAmount())
+                    .interestAmount(target.getInterestAmount())
+                    .overdueInterestAmount(target.getOverdueInterestAmount())
+                    .feeAmount(target.getFeeAmount())
+                    .currencyCd(target.getCurrencyCd())
+                    .channelCd(DEFAULT_CHANNEL)
+                    .rtxStatusCd(RepaymentTransaction.STATUS_SUCCESS)
+                    .paidAt(now)
+                    .valueDate(null)
+                    .balanceAfter(null)
+                    .idempotencyKey(idempotencyKey)
+                    .reversalYn(RepaymentTransaction.YN_Y)
+                    .reversalTargetRtxId(target.getRtxId())
+                    .build());
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException(LoanErrorCode.LOAN_097);
+        }
+    }
+
+    /**
+     * 원 거래에 pi_id 가 있으면 payment-service 를 통해 자동 환급한다.
+     * pi_id 가 없는 거래(창구 수납 등)는 환급이 수동 처리이므로 호출을 생략한다.
+     * 반드시 reversal row INSERT+flush 가 끝난 뒤에 호출해야 한다.
+     */
+    private void refundIfNeeded(RepaymentTransaction target) {
+        if (target.getPiId() != null) {
+            requestRefund(target);
+        }
+    }
+
+    /**
+     * payment-service 환급 이체 호출.
+     * senderAccountId = 은행 수납계좌, receiverAccountNo = 고객 상환계좌.
+     * COMPLETED 이외 응답이면 LOAN_186 예외 (역분개 전체 트랜잭션 롤백).
+     */
+    private void requestRefund(RepaymentTransaction target) {
+        RepaymentAccount account = repaymentAccountRepository
+                .findByCntrIdAndDeletedAtIsNull(target.getCntrId())
+                .orElseThrow(() -> new BusinessException(LoanErrorCode.LOAN_080));
+
+        String receiverAccountNo = cryptoService.decrypt(account.getAccountNoEnc());
+        String receiverHolderName = account.getHolderNameEnc() != null
+                ? cryptoService.decrypt(account.getHolderNameEnc())
+                : account.getHolderNameMasked();
+
+        // 호출자 멱등키를 섞지 않고 rtxId 로만 결정적으로 구성한다.
+        // 키가 호출마다 달라지면 payment-service 멱등도 깨져 이중 환급을 막지 못한다.
+        String refundIdemKey = "REV-" + target.getCntrId() + "-" + target.getRtxId();
+
+        PaymentRequest req = new PaymentRequest(
+                systemAccountProvider.collectionAccount().getAccountNo(),
+                account.getBankCd(),
+                receiverAccountNo,
+                receiverHolderName,
+                BigDecimal.valueOf(target.getTotalAmount()),
+                "대출상환 역분개 환급",
+                "대출환급",
+                CHANNEL_OPEN_BANKING,
+                String.valueOf(target.getCntrId())
+        );
+
+        PaymentResponse resp = paymentServiceClient.pay(refundIdemKey, req);
+        if (resp == null || !PaymentResponse.STATUS_COMPLETED.equals(resp.status())) {
+            String detail = resp != null
+                    ? "status=" + resp.status() + ", failureCategory=" + resp.failureCategory()
+                    : "payment-service 응답 없음";
+            throw new BusinessException(LoanErrorCode.LOAN_186, detail);
+        }
     }
 
     /** "V1" → null (V0 없음), "V2" → "V1", "V12" → "V11". 파싱 실패 또는 V1 이하면 null. */

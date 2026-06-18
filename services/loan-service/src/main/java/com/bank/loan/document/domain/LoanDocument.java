@@ -31,6 +31,9 @@ public class LoanDocument extends BaseEntity {
     public static final String STATUS_REJECTED  = "REJECTED";
     public static final String STATUS_DELETED   = "DELETED";
 
+    /** doc-agent 미연결/일시장애로 검증을 수행하지 못한 상태. 추후 재검증 대상. */
+    public static final String VERIFY_PENDING   = "PENDING";
+
     public static final String SOURCE_MOBILE   = "MOBILE";
     public static final String SOURCE_COUNTER  = "COUNTER";
 
@@ -81,5 +84,31 @@ public class LoanDocument extends BaseEntity {
     /** 상태 전이만 수행. soft delete (deleted_at/by) 는 BaseEntity.softDelete() 로 별도 호출. */
     public void markDeleted() {
         this.docStatusCd = STATUS_DELETED;
+    }
+
+    public void markRetained(String retentionUntil) {
+        this.retentionUntil = retentionUntil;
+    }
+
+    /**
+     * doc-agent 미연결/일시장애로 검증을 보류한다.
+     * 문서 상태는 UPLOADED 로 유지하고(추후 재검증 대상) verify_result_cd 만 PENDING 으로 표시한다.
+     */
+    public void markVerificationDeferred() {
+        this.verifyResultCd = VERIFY_PENDING;
+    }
+
+    /** doc-agent 검증 결과 반영. submissionId 는 docUrl 에 보존. */
+    public void applyVerifyResult(String verifyStatus, String submissionId) {
+        this.docUrl        = submissionId;
+        this.verifyResultCd = verifyStatus;
+        switch (verifyStatus) {
+            case "AUTO_PASS" -> {
+                this.docStatusCd = STATUS_VERIFIED;
+                this.verifiedAt  = OffsetDateTime.now();
+            }
+            case "NEEDS_RESUBMIT" -> this.docStatusCd = STATUS_REJECTED;
+            // HOLD: STATUS_UPLOADED 유지
+        }
     }
 }

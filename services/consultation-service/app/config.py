@@ -15,9 +15,16 @@ class Settings(BaseSettings):
     kafka_topic_chatbot_events: str = "consultation.chatbot.events"
     kafka_topic_chat_events: str = "consultation.chat.events"
     kafka_topic_deposit_events: str = "deposit.contract.events"   # deposit-api 발행 토픽
+    kafka_topic_chatbot_message: str = "consultation.chatbot.message"  # 챗봇 메시지 수신 토픽
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     llm_confidence_threshold: int = 70
+    langfuse_enabled: bool = False
+    langfuse_secret_key: str = ""
+    langfuse_public_key: str = ""
+    langfuse_host: str = "http://localhost:3001"
+    # customer-service 연동 (나이/생년월일 조회용)
+    customer_service_url: str = "http://localhost:8081"
 
     model_config = SettingsConfigDict(
         env_prefix="CONSULTATION_",

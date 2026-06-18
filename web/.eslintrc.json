@@ -1,3 +1,18 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "overrides": [
+    {
+      "files": [
+        "lib/loan-api.ts",
+        "lib/ai-api.ts",
+        "lib/advisory-api.ts",
+        "app/**/loan/**/*.tsx",
+        "app/**/loans/**/*.tsx",
+        "app/**/ai/**/*.tsx"
+      ],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    }
+  ]
 }

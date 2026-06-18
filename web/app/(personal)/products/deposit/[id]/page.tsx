@@ -1,17 +1,19 @@
-'use client'
+﻿'use client'
+import { KB_PRIMARY } from '@/lib/theme'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import CartModal from '@/components/products/CartModal'
 import ConsultModal from '@/components/layout/ConsultModal'
 import RateModal from '@/components/products/RateModal'
+import AutoBreadcrumb from '@/components/layout/AutoBreadcrumb'
+import { fetchDepositProduct, getDepositProductIdBySlug } from '@/lib/deposit-api'
 
 const DEPOSIT_SIDEBAR = [
   { label: '예금 상품/가입', href: '/products/deposit', active: true },
   { label: '판매중지상품', href: '#' },
   { label: '예금 조회/해지', href: '/products/deposit/inquiry/new' },
-  { label: '예금 관리', href: '/products/deposit/manage/convert' },
   { label: '예금 가이드', href: '#' },
 ]
 
@@ -30,8 +32,8 @@ type ProductInfo = {
 const PRODUCTS: Record<string, ProductInfo> = {
   'axful-regular': {
     name: 'AXful 정기예금',
-    label: 'Digital AXful의 대표 정기예금 / 인터넷·스타뱅킹',
-    channel: '인터넷·스타뱅킹',
+    label: 'Digital AXful의 대표 정기예금 / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
     period: '1~36개월',
     minAmount: '1백만원 이상',
     rate: '연 2.4%~2.9%',
@@ -57,11 +59,113 @@ const PRODUCTS: Record<string, ProductInfo> = {
   },
   'axful-youth': {
     name: 'AXful 청년도약계좌',
-    label: '청년의 자산형성을 응원합니다 / 인터넷·스타뱅킹',
-    channel: '인터넷·스타뱅킹',
+    label: '청년의 자산형성을 응원합니다 / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
     period: '60개월',
     minAmount: '월 1천원 이상',
     rate: '연 3.5%~6.0%',
+    rateDate: '2026.05.25',
+  },
+  // ── 적금 ──────────────────────────────────────────────────────────────────
+  'axful-free': {
+    name: 'AXful 내맘대로적금',
+    label: '누구나 쉽게 자유롭게 DIY / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
+    period: '6~36개월',
+    minAmount: '월 1만원 이상',
+    rate: '연 2.95%~3.55%',
+    rateDate: '2026.05.25',
+  },
+  'axful-dollar': {
+    name: 'AXful 달러자적금',
+    label: '달러 가치상승 응원하는 두배이율 / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
+    period: '6개월',
+    minAmount: '월 1만원 이상',
+    rate: '연 1%~7.2%',
+    rateDate: '2026.05.25',
+  },
+  'axful-green': {
+    name: 'AXful 맑은하늘적금',
+    label: '맑은하늘 인증코드 금리도 Up / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
+    period: '6~36개월',
+    minAmount: '월 1만원 이상',
+    rate: '연 2.85%~3.85%',
+    rateDate: '2026.05.25',
+  },
+  'axful-soldier': {
+    name: 'AXful 장병내일준비적금',
+    label: '국군장병 미래대비 앞날준비 / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
+    period: '24개월',
+    minAmount: '월 1만원 이상',
+    rate: '연 5%~10.5%',
+    rateDate: '2026.05.25',
+  },
+  'axful-star-savings': {
+    name: 'AXful 특★한 적금',
+    label: '고객 모두의 높은 수익을 위한 특별한 준비 / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
+    period: '1~12개월',
+    minAmount: '월 1만원 이상',
+    rate: '연 2%~6%',
+    rateDate: '2026.05.25',
+  },
+  // ── 입출금자유 ────────────────────────────────────────────────────────────
+  'axful-free-account': {
+    name: 'AXful 자유입출금통장',
+    label: '언제든 자유롭게 입출금 가능한 기본 통장 / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
+    period: '기간 제한 없음',
+    minAmount: '제한 없음',
+    rate: '연 0.1%',
+    rateDate: '2026.05.25',
+  },
+  'axful-sok': {
+    name: 'AXful 쏙머니통장',
+    label: '쇼핑용 아껴 쏙머니가 쏙~ / 영업점',
+    channel: '영업점',
+    period: '기간 제한 없음',
+    minAmount: '제한 없음',
+    rate: '연 1.5%',
+    rateDate: '2026.05.25',
+  },
+  'monimo-daily': {
+    name: '모니모 AXful 매일이자 통장',
+    label: '하루만 넣어도 이자가 쌓이는 / 영업점',
+    channel: '영업점',
+    period: '기간 제한 없음',
+    minAmount: '제한 없음',
+    rate: '연 2.5% (일 복리)',
+    rateDate: '2026.05.25',
+  },
+  'axful-youth-account': {
+    name: 'AXful 청년우대통장',
+    label: '만 19~34세 청년을 위한 우대금리 제공 / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
+    period: '기간 제한 없음',
+    minAmount: '제한 없음',
+    rate: '연 0.1%~2.0%',
+    rateDate: '2026.05.25',
+  },
+  // ── 주택청약 ──────────────────────────────────────────────────────────────
+  'housing-savings': {
+    name: '주택청약종합저축',
+    label: '내 집 마련의 꿈을 응원합니다 / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
+    period: '24개월 기준',
+    minAmount: '월 2만원 이상',
+    rate: '연 3.1%',
+    rateDate: '2026.05.25',
+  },
+  'youth-housing': {
+    name: '청년 주택드림 청약통장',
+    label: '청년의 내 집 마련을 응원합니다 / 인터넷뱅킹',
+    channel: '인터넷뱅킹',
+    period: '24개월 기준',
+    minAmount: '월 2만원 이상',
+    rate: '연 3.1%~4.5%',
     rateDate: '2026.05.25',
   },
 }
@@ -92,6 +196,40 @@ const PRODUCT_RATES: Record<string, RateRow[]> = {
   'axful-youth': [
     { period: '60개월 (기본)',            base: '3.50', customer: '4.50' },
     { period: '60개월 (소득요건 충족)',   base: '3.50', customer: '6.00' },
+  ],
+  'axful-free': [
+    { period: '6개월 이상 ~ 12개월미만', base: '2.20', customer: '2.95' },
+    { period: '12개월 이상 ~ 24개월미만',base: '2.50', customer: '3.25' },
+    { period: '24개월 이상 ~ 36개월미만',base: '2.70', customer: '3.45' },
+    { period: '36개월',                  base: '2.80', customer: '3.55' },
+  ],
+  'axful-dollar': [
+    { period: '6개월',                   base: '1.00', customer: '7.20' },
+  ],
+  'axful-green': [
+    { period: '6개월 이상 ~ 12개월미만', base: '2.10', customer: '2.85' },
+    { period: '12개월 이상 ~ 24개월미만',base: '2.50', customer: '3.25' },
+    { period: '24개월 이상 ~ 36개월미만',base: '2.80', customer: '3.55' },
+    { period: '36개월',                  base: '3.10', customer: '3.85' },
+  ],
+  'axful-soldier': [
+    { period: '24개월',                  base: '5.00', customer: '10.50' },
+  ],
+  'axful-star-savings': [
+    { period: '1개월',                   base: '2.00', customer: '3.50' },
+    { period: '3개월',                   base: '2.50', customer: '4.50' },
+    { period: '6개월',                   base: '3.00', customer: '5.50' },
+    { period: '12개월',                  base: '3.50', customer: '6.00' },
+  ],
+  'axful-youth-account': [
+    { period: '기본',                    base: '0.10', customer: '2.00' },
+  ],
+  'housing-savings': [
+    { period: '24개월 기준',             base: '2.80', customer: '3.10' },
+  ],
+  'youth-housing': [
+    { period: '24개월 기준 (기본)',       base: '3.10', customer: '3.50' },
+    { period: '24개월 기준 (요건 충족)',  base: '3.10', customer: '4.50' },
   ],
 }
 
@@ -163,26 +301,98 @@ function SpecRow({ label, children }: { label: string; children: React.ReactNode
 export default function DepositDetailPage() {
   const params = useParams()
   const id = typeof params.id === 'string' ? params.id : 'axful-regular'
-  const product = PRODUCTS[id] ?? PRODUCTS['axful-regular']
+  const fallbackProduct = PRODUCTS[id] ?? PRODUCTS['axful-regular']
+  const [apiProduct, setApiProduct] = useState<ProductInfo | null>(null)
+  const product = apiProduct ?? fallbackProduct
   const [activeTab, setActiveTab] = useState('상품안내')
   const [showCart, setShowCart] = useState(false)
   const [showConsult, setShowConsult] = useState(false)
   const [showRate, setShowRate] = useState(false)
   const [calcAmount, setCalcAmount] = useState('')
   const [calcMonths, setCalcMonths] = useState('')
-  const [calcRate, setCalcRate] = useState('')
+  const [calcRate, setCalcRate] = useState(product.rate.match(/[\d.]+/)?.[0] ?? '')
   const [calcResult, setCalcResult] = useState<string | null>(null)
   const isAxfulRegular = id === 'axful-regular'
-  const rates = PRODUCT_RATES[id] ?? PRODUCT_RATES['axful-regular']
+  const rates = PRODUCT_RATES[id] ?? []
+
+  // 적금 상품 ID 목록
+  const SAVINGS_IDS       = new Set(['axful-free', 'axful-dollar', 'axful-green', 'axful-soldier', 'axful-star-savings'])
+  const FREE_SAVINGS_IDS  = new Set(['axful-free', 'axful-dollar', 'axful-green', 'axful-star-savings'])
+  const isSavings         = SAVINGS_IDS.has(id)
+  const isFreeStyleSavings = FREE_SAVINGS_IDS.has(id)
+
+  // 수시입출금 통장 상품 ID 목록
+  const CHECKING_IDS = new Set([
+    'axful-sok', 'monimo-daily', 'axful-moim', 'axful-star-account',
+    'axful-wallet', 'axful-free-account', 'axful-youth-account',
+  ])
+  const isChecking = CHECKING_IDS.has(id)
+
+  useEffect(() => {
+    const productId = getDepositProductIdBySlug(id)
+    if (!productId) return
+
+    let cancelled = false
+    async function loadProduct() {
+      try {
+        const data = await fetchDepositProduct(productId)
+        if (cancelled) return
+
+        const minMonth = data.minPeriodMonth
+        const maxMonth = data.maxPeriodMonth
+        const period =
+          minMonth && maxMonth
+            ? minMonth === maxMonth
+              ? `${minMonth}개월`
+              : `${minMonth}~${maxMonth}개월`
+            : fallbackProduct.period
+        const minAmount = data.minJoinAmount
+          ? `${Number(data.minJoinAmount).toLocaleString('ko-KR')}원 이상`
+          : fallbackProduct.minAmount
+        const rate = data.bestRate != null
+          ? `최고 연 ${Number(data.bestRate).toLocaleString('ko-KR')}%`
+          : data.baseInterestRate != null
+          ? `기본 연 ${Number(data.baseInterestRate).toLocaleString('ko-KR')}%`
+          : fallbackProduct.rate
+
+        setApiProduct({
+          ...fallbackProduct,
+          name: data.productName,
+          label: `${data.description || fallbackProduct.label} / ${fallbackProduct.channel}`,
+          period,
+          minAmount,
+          rate,
+        })
+      } catch {
+        // API가 내려가 있으면 기존 정적 상품 정보로 계속 표시합니다.
+      }
+    }
+
+    loadProduct()
+    return () => {
+      cancelled = true
+    }
+  }, [fallbackProduct, id])
 
   function handleCalc() {
     const a = parseFloat(calcAmount.replace(/,/g, ''))
     const m = parseFloat(calcMonths)
     const r = parseFloat(calcRate)
-    if (!a || !m || !r) { alert('예치금액, 기간, 금리를 모두 입력해주세요.'); return }
-    const interest = Math.floor(a * (r / 100) * (m / 12))
-    const total = a + interest
-    setCalcResult(`만기 수령액: ${total.toLocaleString()}원 (이자 ${interest.toLocaleString()}원)`)
+    if (!a || !m || !r) { alert('금액, 기간, 금리를 모두 입력해주세요.'); return }
+
+    if (isSavings) {
+      // 적금: 단리 적립식 — 월 저축금액 × 연이율/12 × n(n+1)/2
+      const monthlyRate = r / 100 / 12
+      const interest = Math.floor(a * monthlyRate * m * (m + 1) / 2)
+      const principal = a * m
+      const total = principal + interest
+      setCalcResult(`만기 수령액: ${total.toLocaleString()}원 (원금 ${principal.toLocaleString()}원 + 이자 ${interest.toLocaleString()}원)`)
+    } else {
+      // 예금: 단리 거치식
+      const interest = Math.floor(a * (r / 100) * (m / 12))
+      const total = a + interest
+      setCalcResult(`만기 수령액: ${total.toLocaleString()}원 (이자 ${interest.toLocaleString()}원)`)
+    }
   }
 
   return (
@@ -207,10 +417,10 @@ export default function DepositDetailPage() {
           </nav>
           <div className="mt-6 space-y-2">
             <Link href="/cert"
-              className="flex items-center gap-2 border border-kb-border px-3 py-2 text-sm text-kb-text-body hover:bg-kb-beige-light">
+              className="flex items-center gap-2 border border-kb-border rounded-lg px-3 py-2 text-sm text-kb-text-body hover:bg-kb-beige-light">
               🔒 인증센터
             </Link>
-            <div className="border border-kb-border px-3 py-2 text-sm text-kb-text-body">
+            <div className="border border-kb-border rounded-lg px-3 py-2 text-sm text-kb-text-body">
               <p className="text-[10px] text-kb-text-muted">신규상담</p>
               <p className="font-bold text-kb-text">1800-9500</p>
             </div>
@@ -220,17 +430,14 @@ export default function DepositDetailPage() {
         {/* 본문 */}
         <main className="flex-1 pl-8 pt-4 pb-12">
           {/* 브레드크럼 */}
-          <div className="flex justify-end mb-2 text-[12px] text-kb-text-muted gap-1 items-center">
-            <span>개인뱅킹</span><span>&gt;</span>
-            <span>금융상품</span><span>&gt;</span>
-            <span>예금</span><span>&gt;</span>
-            <Link href="/products/deposit" className="hover:underline">예금 상품/가입</Link>
-            <span>&gt;</span>
-            <Link href="#" className="text-kb-blue hover:underline">도움말</Link>
-          </div>
+          <AutoBreadcrumb
+            as="/products/deposit/list"
+            className="flex justify-end items-center mb-2 text-[12px] text-kb-text-muted gap-1"
+            trailing={<Link href="#" className="text-kb-blue hover:underline">도움말</Link>}
+          />
 
           {/* 상품 카드 */}
-          <div className="border border-kb-border p-5 mb-4">
+          <div className="border border-kb-border rounded-xl p-5 mb-4">
             <p className="text-[12px] text-kb-text-muted mb-1">{product.label}</p>
             <h1 className="text-[22px] font-bold text-kb-text mb-4">{product.name}</h1>
 
@@ -238,7 +445,7 @@ export default function DepositDetailPage() {
             <div className="flex items-start gap-6 mb-5">
               {/* 기간 */}
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#5BC9A8' }}>
+                <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: KB_PRIMARY }}>
                   <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="4" width="18" height="17" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
                   </svg>
@@ -250,7 +457,7 @@ export default function DepositDetailPage() {
               </div>
               {/* 금액 */}
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#5BC9A8' }}>
+                <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: KB_PRIMARY }}>
                   <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="17"/><path d="M9 10h4.5a1.5 1.5 0 010 3H9v-3z"/><path d="M9 13h5a1.5 1.5 0 010 3H9v-3z"/>
                   </svg>
@@ -278,19 +485,19 @@ export default function DepositDetailPage() {
             {/* 액션 버튼 4개 */}
             <div className="flex gap-2 mb-1">
               <Link href={`/products/deposit/join/${id}`}
-                className="bg-kb-yellow px-6 py-2 text-[13px] font-bold text-kb-text hover:bg-kb-yellow-dark transition-colors">
+                className="bg-kb-primary px-6 py-2 text-[13px] font-bold text-white rounded-xl hover:opacity-85 transition-opacity">
                 온라인가입
               </Link>
               <button onClick={() => setShowCart(true)}
-                className="border border-kb-border px-6 py-2 text-[13px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                className="border border-kb-border rounded-xl px-6 py-2 text-[13px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                 장바구니
               </button>
               <button onClick={() => setShowConsult(true)}
-                className="border border-kb-border px-6 py-2 text-[13px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                className="border border-kb-border rounded-xl px-6 py-2 text-[13px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                 상담신청
               </button>
               <Link href="/support/consultation/branch"
-                className="border border-kb-border px-6 py-2 text-[13px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                className="border border-kb-border rounded-xl px-6 py-2 text-[13px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                 영업점 방문예약
               </Link>
             </div>
@@ -299,32 +506,34 @@ export default function DepositDetailPage() {
             </p>
           </div>
 
-          {/* 예금 계산기 */}
-          <div className="border border-kb-border px-5 py-4 mb-1">
-            <p className="text-[13px] font-bold text-kb-text mb-3">예금 계산기</p>
+          {/* 예금/적금 계산기 */}
+          <div className="border border-kb-border rounded-xl px-5 py-4 mb-1">
+            <p className="text-[13px] font-bold text-kb-text mb-3">{isSavings ? '적금 계산기' : '예금 계산기'}</p>
             {/* 시나리오 레이블 */}
-            <div className="border border-kb-border px-4 py-2.5 mb-3 flex items-center gap-2 bg-white" style={{ width: '100%' }}>
-              <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4 flex-shrink-0 text-[#5BC9A8]" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <div className="border border-kb-border rounded-lg px-4 py-2.5 mb-3 flex items-center gap-2 bg-white" style={{ width: '100%' }}>
+              <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4 flex-shrink-0 text-kb-primary" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <path d="M3 10a7 7 0 0112.04-4.87"/><polyline points="19,2 15,5.5 18.5,9"/><path d="M17 10a7 7 0 01-12.04 4.87"/><polyline points="1,18 5,14.5 1.5,11"/>
               </svg>
-              <span className="text-[13px] text-kb-text-body">열심히 모은 목돈을 예치할 때</span>
+              <span className="text-[13px] text-kb-text-body">
+                {isFreeStyleSavings ? '자유롭게 납입할 때 (월 평균 납입 기준)' : isSavings ? '매월 일정금액을 저축할 때' : '열심히 모은 목돈을 예치할 때'}
+              </span>
             </div>
             {/* 입력 행 */}
             <div className="flex items-center gap-2 flex-wrap">
               <input
                 type="text"
-                placeholder="예치금액"
+                placeholder={isFreeStyleSavings ? '월 평균 납입액' : isSavings ? '월 저축금액' : '예치금액'}
                 value={calcAmount}
                 onChange={e => setCalcAmount(e.target.value)}
-                className="border border-kb-border px-3 py-1.5 text-[13px] w-28 outline-none"
+                className="border border-kb-border rounded-lg px-3 py-1.5 text-[13px] w-28 outline-none"
               />
-              <span className="text-[13px] text-kb-text-body">원을</span>
+              <span className="text-[13px] text-kb-text-body">{isSavings ? '원씩' : '원을'}</span>
               <input
                 type="text"
                 placeholder="기간"
                 value={calcMonths}
                 onChange={e => setCalcMonths(e.target.value)}
-                className="border border-kb-border px-3 py-1.5 text-[13px] w-16 outline-none"
+                className="border border-kb-border rounded-lg px-3 py-1.5 text-[13px] w-16 outline-none"
               />
               <span className="text-[13px] text-kb-text-body">개월 간</span>
               <input
@@ -332,9 +541,9 @@ export default function DepositDetailPage() {
                 placeholder="금리"
                 value={calcRate}
                 onChange={e => setCalcRate(e.target.value)}
-                className="border border-kb-border px-3 py-1.5 text-[13px] w-16 outline-none"
+                className="border border-kb-border rounded-lg px-3 py-1.5 text-[13px] w-16 outline-none"
               />
-              <span className="text-[13px] text-kb-text-body">%의 예금상품에 저축하면?</span>
+              <span className="text-[13px] text-kb-text-body">%의 {isSavings ? '적금' : '예금'}상품에 저축하면?</span>
               <button
                 onClick={handleCalc}
                 className="bg-[#5C5C5C] text-white px-5 py-1.5 text-[13px] hover:opacity-90 transition-opacity ml-auto"
@@ -343,7 +552,7 @@ export default function DepositDetailPage() {
               </button>
             </div>
             {calcResult && (
-              <p className="mt-2 text-[13px] font-semibold" style={{ color: '#5BC9A8' }}>{calcResult}</p>
+              <p className="mt-2 text-[13px] font-semibold" style={{ color: KB_PRIMARY }}>{calcResult}</p>
             )}
           </div>
 
@@ -361,7 +570,7 @@ export default function DepositDetailPage() {
                 {sns.label}
               </button>
             ))}
-            <button className="flex items-center gap-1 border border-kb-border px-3 py-1.5 text-[12px] text-kb-text-body hover:bg-kb-beige-light ml-1">
+            <button className="flex items-center gap-1 border border-kb-border rounded-lg px-3 py-1.5 text-[12px] text-kb-text-body hover:bg-kb-beige-light ml-1">
               <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5" stroke="currentColor" strokeWidth="1.5">
                 <rect x="1" y="3" width="14" height="10" rx="1"/><polyline points="1,3 8,9 15,3"/>
               </svg>
@@ -439,7 +648,7 @@ export default function DepositDetailPage() {
                             <li>- 자동해지 : 만기일 당일 상품 신규가입 시 출금계좌에 만기해지 금액 전액 입금</li>
                             <li>- 자동재예치(원금) : 만기(재예치)일 당일 고시한 고객적용이율을 적용하며, 적용이자율을 제외한 가입조건은 기존 가입조건과 동일하게 원금부분만 재예치, 이자 금액은 신규가입 시 출금계좌에 입금</li>
                             <li>- 자동재예치(원금+이자) : 만기(재예치)일 당일 고시한 고객적용이율을 적용하며, 적용이자율을 제외한 가입조건은 기존 가입조건과 동일조건으로 만기해지 금액 전액 재예치</li>
-                            <li className="mt-1 text-kb-text-muted">-「오픈뱅킹」서비스를 통해 신규 가입한 경우, 자동해지(재예치)시 만기해지금액(이자금액)은 AX풀뱅크 출금계좌로 입금됩니다.</li>
+                            <li className="mt-1 text-kb-text-muted">-「오픈뱅킹」서비스를 통해 신규 가입한 경우, 자동해지(재예치)시 만기해지금액(이자금액)은 AXful Bank 출금계좌로 입금됩니다.</li>
                           </ul>
                         </SpecRow>
                         <SpecRow label="분할인출">
@@ -454,8 +663,22 @@ export default function DepositDetailPage() {
                     </table>
                   </div>
                 </>
+              ) : isChecking ? (
+                /* 수시입출금 통장 — 기본 레이아웃 */
+                <div className="py-8 space-y-6">
+                  <table className="w-full border-collapse border-t-2 border-kb-text">
+                    <tbody>
+                      <SpecRow label="가입대상">실명의 개인</SpecRow>
+                      <SpecRow label="가입기간">제한 없음</SpecRow>
+                      <SpecRow label="가입금액">제한 없음</SpecRow>
+                      <SpecRow label="이자지급방식">매월 이자지급식</SpecRow>
+                      <SpecRow label="세금">이자소득세 15.4% (지방소득세 포함)</SpecRow>
+                      <SpecRow label="적용이율">{product.rate}</SpecRow>
+                    </tbody>
+                  </table>
+                </div>
               ) : (
-                /* 다른 상품 — 기본 레이아웃 */
+                /* 기타 예금 상품 — 기본 레이아웃 */
                 <div className="py-8 space-y-6">
                   <table className="w-full border-collapse border-t-2 border-kb-text">
                     <tbody>
@@ -472,16 +695,16 @@ export default function DepositDetailPage() {
               {/* 하단 버튼 */}
               <div className="flex justify-center gap-2 mt-10">
                 <Link href={`/products/deposit/join/${id}`}
-                  className="bg-kb-yellow px-10 py-3 text-[14px] font-bold text-kb-text hover:bg-kb-yellow-dark transition-colors">
+                  className="bg-kb-primary px-10 py-3 text-[14px] font-bold text-white rounded-xl hover:opacity-85 transition-opacity">
                   온라인가입
                 </Link>
                 <Link href="/products/deposit"
-                  className="border border-kb-border px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                  className="border border-kb-border rounded-xl px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                   목록
                 </Link>
                 <button
                   onClick={() => window.print()}
-                  className="border border-kb-border px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                  className="border border-kb-border rounded-xl px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                   인쇄
                 </button>
               </div>
@@ -500,7 +723,7 @@ export default function DepositDetailPage() {
                     <td className="border border-kb-border px-4 py-3">
                       <button
                         onClick={() => setShowRate(true)}
-                        className="border border-kb-border px-4 py-1.5 text-[12px] text-kb-text-body hover:bg-kb-beige-light transition-colors"
+                        className="border border-kb-border rounded-lg px-4 py-1.5 text-[12px] text-kb-text-body hover:bg-kb-beige-light transition-colors"
                       >
                         자세히보기
                       </button>
@@ -511,15 +734,15 @@ export default function DepositDetailPage() {
               {/* 하단 버튼 */}
               <div className="flex justify-center gap-2 mt-8">
                 <Link href={`/products/deposit/join/${id}`}
-                  className="bg-kb-yellow px-10 py-3 text-[14px] font-bold text-kb-text hover:bg-kb-yellow-dark transition-colors">
+                  className="bg-kb-primary px-10 py-3 text-[14px] font-bold text-white rounded-xl hover:opacity-85 transition-opacity">
                   온라인가입
                 </Link>
                 <Link href="/products/deposit"
-                  className="border border-kb-border px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                  className="border border-kb-border rounded-xl px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                   목록
                 </Link>
                 <button onClick={() => window.print()}
-                  className="border border-kb-border px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                  className="border border-kb-border rounded-xl px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                   인쇄
                 </button>
               </div>
@@ -556,7 +779,7 @@ export default function DepositDetailPage() {
                     '금융소비자는 해당 상품 또는 서비스에 대하여 설명받을 권리가 있습니다.',
                     '만기 전 해지할 경우 계약에서 정한 이율보다 낮은 중도해지이율이 적용됩니다.',
                     '계좌에 압류, 가압류, 질권 등이 등록될 경우 원금 및 이자 지급이 제한될 수 있습니다.',
-                    '이 상품은 AX풀뱅크 수신상품부(P)에서 관리하는 상품입니다. 기타 상품에 대한 자세한 사항은 영업점 또는 고객센터(☎ 1588-9999)로 문의하시거나, 상품설명서를 참조하시기 바랍니다.',
+                    '이 상품은 AXful Bank 수신상품부(P)에서 관리하는 상품입니다. 기타 상품에 대한 자세한 사항은 영업점 또는 고객센터(☎ 1588-9999)로 문의하시거나, 상품설명서를 참조하시기 바랍니다.',
                   ].map((item, i) => (
                     <li key={i} className="flex gap-2">
                       <span className="flex-shrink-0">·</span>{item}
@@ -577,7 +800,7 @@ export default function DepositDetailPage() {
                       <li>③ 재예치 가능기간(최장 10년)이 경과될 경우</li>
                     </ul>
                   </li>
-                  <li>* 통장발행을 원하실 경우, 영업점에 방문하셔야 하며 수수료가 부과됩니다. 단, 수수료 면제는 AX풀뱅크 수수료 관련지침에서 정하는 바에 따릅니다.</li>
+                  <li>* 통장발행을 원하실 경우, 영업점에 방문하셔야 하며 수수료가 부과됩니다. 단, 수수료 면제는 AXful Bank 수수료 관련지침에서 정하는 바에 따릅니다.</li>
                 </ul>
               </section>
 
@@ -595,7 +818,7 @@ export default function DepositDetailPage() {
               <section className="mb-5">
                 <p className="font-bold text-kb-text mb-2 text-[14px]">예금자보호여부</p>
                 <p className="font-semibold mb-1">예금보험공사 보호금융상품 1인당 최고 1억원</p>
-                <p>이 예금은 예금자보호법에 따라 원금과 소정의 이자를 합하여 1인당 <span className="font-semibold">"1억원까지"</span>(본 은행의 여타 보호상품과 합산) 보호됩니다.</p>
+                <p>이 예금은 예금자보호법에 따라 원금과 소정의 이자를 합하여 1인당 <span className="font-semibold">&quot;1억원까지&quot;</span>(본 은행의 여타 보호상품과 합산) 보호됩니다.</p>
               </section>
 
               {/* 준법감시인 */}
@@ -609,7 +832,7 @@ export default function DepositDetailPage() {
                 <p className="font-bold text-kb-text mb-3 text-[14px]">상품내용 변경에 관한 사항</p>
 
                 {/* 2022.12.15 */}
-                <div className="border border-kb-border mb-3">
+                <div className="border border-kb-border rounded-xl overflow-hidden mb-3">
                   <div className="bg-kb-beige-light px-4 py-2 font-semibold text-kb-text border-b border-kb-border">
                     2022.12.15 변경 — 금리우대쿠폰 항목 추가
                   </div>
@@ -622,7 +845,7 @@ export default function DepositDetailPage() {
                 </div>
 
                 {/* 2019.04.17 */}
-                <div className="border border-kb-border mb-3">
+                <div className="border border-kb-border rounded-xl overflow-hidden mb-3">
                   <div className="bg-kb-beige-light px-4 py-2 font-semibold text-kb-text border-b border-kb-border">
                     2019.04.17 변경 — 판매채널 확대(콜센터 추가)
                   </div>
@@ -640,7 +863,7 @@ export default function DepositDetailPage() {
                 </div>
 
                 {/* 2018.10.30 */}
-                <div className="border border-kb-border mb-3">
+                <div className="border border-kb-border rounded-xl overflow-hidden mb-3">
                   <div className="bg-kb-beige-light px-4 py-2 font-semibold text-kb-text border-b border-kb-border">
                     2018.10.30 변경 — 중도해지이율 변경
                   </div>
@@ -705,7 +928,7 @@ export default function DepositDetailPage() {
           {/* ── 약관·상품설명서 탭 ── */}
           {activeTab === '약관·상품설명서' && (
             <div className="py-5">
-              <div className="bg-[#F5F5F5] border border-kb-border p-4">
+              <div className="bg-[#F5F5F5] border border-kb-border rounded-xl p-4">
                 <div className="flex flex-wrap gap-2">
                   {[
                     '거치식예금약관',
@@ -715,7 +938,7 @@ export default function DepositDetailPage() {
                   ].map(doc => (
                     <button key={doc}
                       onClick={() => alert(`${doc} 파일을 다운로드합니다.`)}
-                      className="flex items-center gap-2 border border-kb-border bg-white px-4 py-2 text-[13px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                      className="flex items-center gap-2 border border-kb-border rounded-lg bg-white px-4 py-2 text-[13px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                       <span className="w-6 h-6 flex items-center justify-center border border-kb-border bg-white flex-shrink-0">
                         <svg viewBox="0 0 14 16" fill="none" className="w-3.5 h-4" stroke="currentColor" strokeWidth="1.5">
                           <rect x="1" y="1" width="10" height="14" rx="1"/>
@@ -731,15 +954,15 @@ export default function DepositDetailPage() {
               {/* 하단 버튼 */}
               <div className="flex justify-center gap-2 mt-8">
                 <Link href={`/products/deposit/join/${id}`}
-                  className="bg-kb-yellow px-10 py-3 text-[14px] font-bold text-kb-text hover:bg-kb-yellow-dark transition-colors">
+                  className="bg-kb-primary px-10 py-3 text-[14px] font-bold text-white rounded-xl hover:opacity-85 transition-opacity">
                   온라인가입
                 </Link>
                 <Link href="/products/deposit"
-                  className="border border-kb-border px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                  className="border border-kb-border rounded-xl px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                   목록
                 </Link>
                 <button onClick={() => window.print()}
-                  className="border border-kb-border px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
+                  className="border border-kb-border rounded-xl px-10 py-3 text-[14px] text-kb-text-body hover:bg-kb-beige-light transition-colors">
                   인쇄
                 </button>
               </div>

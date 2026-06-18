@@ -1,11 +1,14 @@
 package com.bank.ai.rag.search;
 
+import com.bank.ai.langfuse.LangfuseService;
 import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.rag.embedding.EmbeddingClient;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
@@ -30,7 +33,8 @@ import java.util.Optional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class RagSearchService {
+@ConditionalOnProperty(prefix = "ai.rag", name = "backend", havingValue = "inline", matchIfMissing = true)
+public class RagSearchService implements RagSearchBackend {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -38,6 +42,9 @@ public class RagSearchService {
     private final EmbeddingClient embeddingClient;
     private final RagSearchProperties props;
     private final AgentMetricsRecorder metricsRecorder;
+
+    @Autowired(required = false)
+    private LangfuseService langfuse;
 
     /**
      * 하이브리드 검색.
@@ -72,10 +79,19 @@ public class RagSearchService {
                     .paramSource(optionalParams)
                     .query(this::mapChunk)
                     .list();
-            metricsRecorder.recordRagSearchLatency(corpus, Duration.between(start, Instant.now()));
+            Instant end = Instant.now();
+            metricsRecorder.recordRagSearchLatency(corpus, Duration.between(start, end));
             metricsRecorder.recordRagChunkCount(corpus, results.size());
             if (results.isEmpty()) {
                 metricsRecorder.recordRagSearchMiss(corpus);
+            }
+            if (langfuse != null) {
+                String traceId = langfuse.newTraceId();
+                langfuse.trace(traceId, "auto-loan-review", null, List.of("auto-loan-review"));
+                langfuse.span(traceId, "rag-search",
+                        java.util.Map.of("corpus", corpus, "query", query),
+                        java.util.Map.of("chunkCount", results.size()),
+                        start, end);
             }
             return results;
         } catch (Exception e) {

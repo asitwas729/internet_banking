@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -202,16 +203,7 @@ public class PaymentTransactionService {
         BigDecimal amount = command.transferAmount();
 
         // 1. AUTHORIZED→PROCESSING (낙관락, pi.getVersion()+1 = authorize 후 버전)
-        int updated1 = paymentInstructionMapper.updateStatus(
-                piId, "PROCESSING", null, null, pi.getVersion() + 1);
-        if (updated1 == 0) {
-            throw new OptimisticLockingFailureException(
-                    "결제지시 상태 갱신 충돌(PROCESSING): " + piId);
-        }
-        Integer maxSeq3 = statusHistoryMapper.selectMaxSequence(piId);
-        statusHistoryMapper.insert(StatusHistory.of(
-                idGenerator.nextHistoryId(), piId, (maxSeq3 == null ? 0 : maxSeq3) + 1,
-                "AUTHORIZED", "PROCESSING", "PROCESSING_STARTED", "SYSTEM", now));
+        markProcessing(piId, pi.getVersion() + 1, now);
 
         // 2. journal_no 1번 채번 (분개 그룹, 결제 1건당 1개)
         String journalNo = idGenerator.nextJournalNo();
@@ -221,8 +213,8 @@ public class PaymentTransactionService {
                 idGenerator.nextLedgerId(), piId, command.senderAccountId(),
                 journalNo, command.senderAccountId(), senderHolderName,
                 amount,
-                BigDecimal.valueOf(withdrawResult.balanceBefore()),
-                BigDecimal.valueOf(withdrawResult.balanceAfter()),
+                withdrawResult.balanceBefore(),
+                withdrawResult.balanceAfter(),
                 "KRW", businessDate, businessDate, businessDate,
                 now, "자행이체 출금");
 
@@ -236,8 +228,8 @@ public class PaymentTransactionService {
                 idGenerator.nextLedgerId(), piId, command.receiverAccountNo(),
                 journalNo, command.receiverAccountNo(), receiverHolderName,
                 amount,
-                BigDecimal.valueOf(depositResult.balanceBefore()),
-                BigDecimal.valueOf(depositResult.balanceAfter()),
+                depositResult.balanceBefore(),
+                depositResult.balanceAfter(),
                 "KRW", businessDate, businessDate, businessDate,
                 now, "자행이체 입금");
         ledgerMapper.insert(in);
@@ -286,6 +278,103 @@ public class PaymentTransactionService {
     }
 
     /**
+     * TX-2 (txStep4Scheduled): 예약이체 자행 확정 한 트랜잭션.
+     * claimScheduled 가 이미 SCHEDULED→PROCESSING 커밋을 완료했으므로 markProcessing 을 호출하지 않는다.
+     * 대신 PROCESSING_STARTED 이력만 INSERT (상태전이 UPDATE 없음, version 불변).
+     * COMPLETED 전이는 WHERE version = pi.getVersion()+1 (claim 이 +1 을 먹었으므로 +2 아님).
+     * 이력 시퀀스: SCHEDULED_TRIGGERED(claim) → PROCESSING_STARTED → PAYMENT_COMPLETED.
+     * @param pi             selectDueScheduled 로 읽은 PI (version=V, claim 후 DB version=V+1)
+     * @param withdrawResult B-3 출금 응답 (잔액 박제용)
+     * @param depositResult  B-4 입금 응답 (잔액 박제용)
+     * @param command        rebuildCommand 로 조립한 PaymentCommand
+     * @param senderHolderName   step2a 재검증 조회된 송신 예금주명
+     * @param receiverHolderName step2a 재검증 조회된 수신 예금주명
+     * @return PaymentResult (COMPLETED)
+     */
+    @Transactional
+    public PaymentResult txStep4Scheduled(PaymentInstruction pi, BalanceTxData withdrawResult,
+                                          BalanceTxData depositResult, PaymentCommand command,
+                                          String senderHolderName, String receiverHolderName) {
+        LocalDateTime now = LocalDateTime.now();
+        String piId = pi.getPaymentInstructionId();
+        String businessDate = now.toLocalDate().format(DateTimeFormatter.BASIC_ISO_DATE);
+        BigDecimal amount = command.transferAmount();
+
+        // 1. PROCESSING_STARTED 이력만 INSERT (markProcessing 없음 — claim 이 이미 PROCESSING 커밋)
+        Integer maxSeq1 = statusHistoryMapper.selectMaxSequence(piId);
+        statusHistoryMapper.insert(StatusHistory.of(
+                idGenerator.nextHistoryId(), piId, (maxSeq1 == null ? 0 : maxSeq1) + 1,
+                "PROCESSING", "PROCESSING", "PROCESSING_STARTED", "SYSTEM", now));
+
+        // 2. journal_no 채번 (분개 그룹, 결제 1건당 1개)
+        String journalNo = idGenerator.nextJournalNo();
+
+        // 3. 출금 분개 (송신계좌 DEBIT TRANSFER_OUT)
+        Ledger out = Ledger.intraTransferOut(
+                idGenerator.nextLedgerId(), piId, command.senderAccountId(),
+                journalNo, command.senderAccountId(), senderHolderName,
+                amount,
+                withdrawResult.balanceBefore(),
+                withdrawResult.balanceAfter(),
+                "KRW", businessDate, businessDate, businessDate,
+                now, "자행이체 출금");
+
+        // mock 프로파일: F5 시나리오 분개 INSERT 실패 시뮬레이션 (3-C F5 재현용)
+        ledgerFailureSimulator.checkAndThrow(command.receiverAccountNo());
+
+        ledgerMapper.insert(out);
+
+        // 4. 입금 분개 (수신계좌 CREDIT TRANSFER_IN)
+        Ledger in = Ledger.intraTransferIn(
+                idGenerator.nextLedgerId(), piId, command.receiverAccountNo(),
+                journalNo, command.receiverAccountNo(), receiverHolderName,
+                amount,
+                depositResult.balanceBefore(),
+                depositResult.balanceAfter(),
+                "KRW", businessDate, businessDate, businessDate,
+                now, "자행이체 입금");
+        ledgerMapper.insert(in);
+
+        // 5. 차변=대변 검증 (P-014)
+        if (out.getAmount().compareTo(in.getAmount()) != 0) {
+            throw new LedgerBalanceMismatchException(
+                    "차변≠대변: DEBIT " + out.getAmount() + " ≠ CREDIT " + in.getAmount() + " (PI " + piId + ")");
+        }
+
+        // 6. PROCESSING→COMPLETED (낙관락: pi.getVersion()+1 — claim 이 +1, markProcessing 없으므로 +2 아님)
+        int updated = paymentInstructionMapper.updateStatus(
+                piId, "COMPLETED", now, null, pi.getVersion() + 1);
+        if (updated == 0) {
+            throw new OptimisticLockingFailureException(
+                    "결제지시 상태 갱신 충돌(COMPLETED/Scheduled): " + piId);
+        }
+        Integer maxSeq4 = statusHistoryMapper.selectMaxSequence(piId);
+        statusHistoryMapper.insert(StatusHistory.of(
+                idGenerator.nextHistoryId(), piId, (maxSeq4 == null ? 0 : maxSeq4) + 1,
+                "PROCESSING", "COMPLETED", "PAYMENT_COMPLETED", "SYSTEM", now));
+
+        // 7. Outbox (PAYMENT_COMPLETED, PENDING)
+        String payload;
+        try {
+            payload = objectMapper.writeValueAsString(Map.of(
+                    "paymentInstructionId", piId,
+                    "status", "COMPLETED",
+                    "amount", amount,
+                    "completedAt", now.toString()));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Outbox payload 직렬화 실패(Scheduled): " + piId, e);
+        }
+        outboxMessageMapper.insert(OutboxMessage.of(
+                idGenerator.nextMessageId(), piId, "PAYMENT_COMPLETED",
+                "v1", payload, now));
+
+        // 8. 멱등키 완료 (등록 요청의 멱등키 — 재시도 시 COMPLETED 반환)
+        idempotencyKeyMapper.updateStatus(command.idempotencyKey(), "COMPLETED", payload);
+
+        return new PaymentResult(piId, pi.getTransactionNo(), "COMPLETED", null, now);
+    }
+
+    /**
      * TX-2 (txStep4InterBank): 타행이체 확정 한 트랜잭션 (원자성).
      * AUTHORIZED→PROCESSING(seq3) → PROCESSING→CLEARING(seq4) + 분개4건(2묶음) + Outbox(KFTC_REQUEST_SENT)
      * + kftc_clearing_transaction REQUESTED INSERT + 멱등키완료.
@@ -293,14 +382,15 @@ public class PaymentTransactionService {
      * @param pi authorize까지 끝난 결제지시 (version=0, DB version=1)
      * @param withdrawResult B-3 출금 응답 (TRANSFER_OUT 분개 잔액박제용)
      * @param command 원 명령 (금액/계좌/수신은행 등)
-     * @param senderHolderName 송신 예금주명 (step2 A-2 조회값)
+     * @param senderHolderName 송신 예금주명 (step2 A-2 조회값, "미조회")
+     * @param receiverHolderName 수신 예금주명 (step2 A-2 조회값, "미조회") — DB 스냅샷용; Outbox payload는 command.receiverHolderName() 사용
      * @param senderBankCode 자행 3자리 은행코드 (004/088 — Orchestrator에서 계산해 전달)
      * @return PaymentResult (CLEARING, completedAt=null — KFTC 응답 대기)
      */
     @Transactional
     public PaymentResult txStep4InterBank(PaymentInstruction pi, BalanceTxData withdrawResult,
                                            PaymentCommand command, String senderHolderName,
-                                           String senderBankCode) {
+                                           String receiverHolderName, String senderBankCode) {
         LocalDateTime now = LocalDateTime.now();
         String piId = pi.getPaymentInstructionId();
         String businessDate = now.toLocalDate().format(DateTimeFormatter.BASIC_ISO_DATE);
@@ -308,16 +398,7 @@ public class PaymentTransactionService {
         BigDecimal feeAmount = pi.getFeeAmount();  // txStep1에서 isIntraBank=false → 500
 
         // 1. AUTHORIZED→PROCESSING (낙관락: pi.getVersion()+1=1 → DB v2)
-        int updated1 = paymentInstructionMapper.updateStatus(
-                piId, "PROCESSING", null, null, pi.getVersion() + 1);
-        if (updated1 == 0) {
-            throw new OptimisticLockingFailureException(
-                    "결제지시 상태 갱신 충돌(PROCESSING): " + piId);
-        }
-        Integer maxSeq1 = statusHistoryMapper.selectMaxSequence(piId);
-        statusHistoryMapper.insert(StatusHistory.of(
-                idGenerator.nextHistoryId(), piId, (maxSeq1 == null ? 0 : maxSeq1) + 1,
-                "AUTHORIZED", "PROCESSING", "PROCESSING_STARTED", "SYSTEM", now));
+        markProcessing(piId, pi.getVersion() + 1, now);
 
         // 2. journal_no 2묶음 채번 (JN-01=이체본금, JN-02=수수료)
         String jn1 = idGenerator.nextJournalNo();
@@ -328,8 +409,8 @@ public class PaymentTransactionService {
                 idGenerator.nextLedgerId(), piId, command.senderAccountId(),
                 jn1, command.senderAccountId(), senderHolderName,
                 transferAmount,
-                BigDecimal.valueOf(withdrawResult.balanceBefore()),
-                BigDecimal.valueOf(withdrawResult.balanceAfter()),
+                withdrawResult.balanceBefore(),
+                withdrawResult.balanceAfter(),
                 "KRW", businessDate, businessDate, businessDate,
                 now, "타행이체 출금");
         ledgerMapper.insert(out);
@@ -396,17 +477,31 @@ public class PaymentTransactionService {
 
         String payload;
         try {
-            payload = objectMapper.writeValueAsString(Map.of(
-                    "paymentInstructionId", piId,
-                    "clearingNo", clearingNo,
-                    "transactionNo", pi.getTransactionNo(),
-                    "senderAccountId", command.senderAccountId(),
-                    "receiverBankCode", command.receiverBankCode(),
-                    "receiverAccountNo", command.receiverAccountNo(),
-                    "receiverHolderName", command.receiverHolderName(),
-                    "transferAmount", transferAmount,
-                    "feeAmount", feeAmount,
-                    "requestedAt", now.toString()));
+            Map<String, Object> senderNode = new LinkedHashMap<>();
+            senderNode.put("bankCode",    senderBankCode);
+            senderNode.put("accountNo",   command.senderAccountId());
+            senderNode.put("realName",    senderHolderName);
+            senderNode.put("displayName", command.receiverPassbookSenderDisplay());
+
+            Map<String, Object> receiverNode = new LinkedHashMap<>();
+            receiverNode.put("bankCode",           command.receiverBankCode());
+            receiverNode.put("accountNo",          command.receiverAccountNo());
+            receiverNode.put("expectedHolderName", command.receiverHolderName());
+
+            Map<String, Object> payloadMap = new LinkedHashMap<>();
+            payloadMap.put("messageType",          "PAYMENT_REQUEST");
+            payloadMap.put("messageVersion",       "v1");
+            payloadMap.put("correlationId",        clearingNo);
+            payloadMap.put("sequenceNo",           1);
+            payloadMap.put("clearingNo",           clearingNo);
+            payloadMap.put("sender",               senderNode);
+            payloadMap.put("receiver",             receiverNode);
+            payloadMap.put("amount",               transferAmount);
+            payloadMap.put("currency",             "KRW");
+            payloadMap.put("sentAt",               clearingRequestedAt);
+            payloadMap.put("receiverPassbookMemo", command.receiverMemo());
+
+            payload = objectMapper.writeValueAsString(payloadMap);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Outbox payload 직렬화 실패: " + piId, e);
         }
@@ -426,7 +521,7 @@ public class PaymentTransactionService {
                 senderHolderName,
                 command.receiverBankCode(),
                 command.receiverAccountNo(),
-                command.receiverHolderName(),        // 타행: 요청값 그대로 박제
+                receiverHolderName,                  // 정식 연동 전까지 "미조회". 요청값은 미검증값이므로 DB 스냅샷에 박지 않음
                 transferAmount,
                 clearingRequestedAt);
         clearingTransactionMapper.insert(clearingTx);
@@ -446,13 +541,14 @@ public class PaymentTransactionService {
      * @param withdrawResult B-3 출금 응답 (TRANSFER_OUT 분개 잔액박제용)
      * @param command 원 명령 (금액/계좌/수신은행 등)
      * @param senderHolderName 송신 예금주명 (step2 A-2 조회값)
+     * @param receiverHolderName 수신 예금주명 (step2 A-2 조회값, "미조회") — DB 스냅샷용; command.receiverHolderName()은 null 가능
      * @param senderBankCode 자행 3자리 은행코드 (004/088)
      * @return PaymentResult (CLEARING, completedAt=null — BOK 응답 대기)
      */
     @Transactional
     public PaymentResult txStep4InterBok(PaymentInstruction pi, BalanceTxData withdrawResult,
                                           PaymentCommand command, String senderHolderName,
-                                          String senderBankCode) {
+                                          String receiverHolderName, String senderBankCode) {
         LocalDateTime now = LocalDateTime.now();
         String piId = pi.getPaymentInstructionId();
         String businessDate = now.toLocalDate().format(DateTimeFormatter.BASIC_ISO_DATE);
@@ -460,16 +556,7 @@ public class PaymentTransactionService {
         BigDecimal feeAmount = pi.getFeeAmount();
 
         // 1. AUTHORIZED→PROCESSING (낙관락: pi.getVersion()+1=1 → DB v2)
-        int updated1 = paymentInstructionMapper.updateStatus(
-                piId, "PROCESSING", null, null, pi.getVersion() + 1);
-        if (updated1 == 0) {
-            throw new OptimisticLockingFailureException(
-                    "결제지시 상태 갱신 충돌(PROCESSING/BOK): " + piId);
-        }
-        Integer maxSeq1 = statusHistoryMapper.selectMaxSequence(piId);
-        statusHistoryMapper.insert(StatusHistory.of(
-                idGenerator.nextHistoryId(), piId, (maxSeq1 == null ? 0 : maxSeq1) + 1,
-                "AUTHORIZED", "PROCESSING", "PROCESSING_STARTED", "SYSTEM", now));
+        markProcessing(piId, pi.getVersion() + 1, now);
 
         // 2. journal_no 2묶음 채번 (JN-01=이체본금, JN-02=수수료)
         String jn1 = idGenerator.nextJournalNo();
@@ -480,8 +567,8 @@ public class PaymentTransactionService {
                 idGenerator.nextLedgerId(), piId, command.senderAccountId(),
                 jn1, command.senderAccountId(), senderHolderName,
                 transferAmount,
-                BigDecimal.valueOf(withdrawResult.balanceBefore()),
-                BigDecimal.valueOf(withdrawResult.balanceAfter()),
+                withdrawResult.balanceBefore(),
+                withdrawResult.balanceAfter(),
                 "KRW", businessDate, businessDate, businessDate,
                 now, "BOK이체 출금");
         ledgerMapper.insert(out);
@@ -546,23 +633,23 @@ public class PaymentTransactionService {
         String settlementRequestedAt = now.format(CLEARING_AT_FMT);
 
         // 11. Outbox BOK_REQUEST_SENT — SETTLEMENT_REQUEST payload (⑤ 계약, Record Key=bokReferenceNo)
-        // Map.of는 10쌍 한계 → 12쌍이므로 Map.ofEntries 사용
+        // Map.ofEntries는 null value 불허 → receiverHolderName null 시 NPE. LinkedHashMap으로 교체.
         String payload;
         try {
-            payload = objectMapper.writeValueAsString(Map.ofEntries(
-                    Map.entry("messageType",          "SETTLEMENT_REQUEST"),
-                    Map.entry("messageVersion",       "v1"),
-                    Map.entry("bokReferenceNo",       bokReferenceNo),
-                    Map.entry("paymentInstructionNo", piId),
-                    Map.entry("senderBankCode",       senderBankCode),
-                    Map.entry("senderAccountNo",      command.senderAccountId()),
-                    Map.entry("receiverBankCode",     command.receiverBankCode()),
-                    Map.entry("receiverAccountNo",    command.receiverAccountNo()),
-                    Map.entry("receiverHolderName",   command.receiverHolderName()),
-                    Map.entry("settlementAmount",     transferAmount),
-                    Map.entry("fee",                  feeAmount),
-                    Map.entry("requestedAt",          now.toString())
-            ));
+            Map<String, Object> payloadMap = new LinkedHashMap<>();
+            payloadMap.put("messageType",          "SETTLEMENT_REQUEST");
+            payloadMap.put("messageVersion",       "v1");
+            payloadMap.put("bokReferenceNo",       bokReferenceNo);
+            payloadMap.put("paymentInstructionNo", piId);
+            payloadMap.put("senderBankCode",       senderBankCode);
+            payloadMap.put("senderAccountNo",      command.senderAccountId());
+            payloadMap.put("receiverBankCode",     command.receiverBankCode());
+            payloadMap.put("receiverAccountNo",    command.receiverAccountNo());
+            payloadMap.put("receiverHolderName",   receiverHolderName);
+            payloadMap.put("settlementAmount",     transferAmount);
+            payloadMap.put("fee",                  feeAmount);
+            payloadMap.put("requestedAt",          now.toString());
+            payload = objectMapper.writeValueAsString(payloadMap);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Outbox payload 직렬화 실패(BOK_REQUEST_SENT): " + piId, e);
         }
@@ -580,7 +667,7 @@ public class PaymentTransactionService {
                 senderHolderName,
                 command.receiverBankCode(),
                 command.receiverAccountNo(),
-                command.receiverHolderName(),
+                receiverHolderName,
                 transferAmount,
                 settlementRequestedAt);
         settlementTransactionMapper.insert(bst);
@@ -589,6 +676,92 @@ public class PaymentTransactionService {
         idempotencyKeyMapper.updateStatus(command.idempotencyKey(), "COMPLETED", payload);
 
         return new PaymentResult(piId, pi.getTransactionNo(), "CLEARING", null, null);
+    }
+
+    /**
+     * SCHEDULED→PROCESSING 선점(claim). 예약이체 워커 전용. 독립 @Transactional — 후속 실행 TX와 분리 필수.
+     * 반환 true = 선점 성공, false = 다른 인스턴스가 이미 선점(정상 경합, 예외 아님).
+     * ★ pi.getVersion() 은 selectDueScheduled 로 읽은 값(claim 전)을 그대로 넘길 것.
+     *   이 메서드는 pi 객체의 version 을 변경하지 않는다. DB만 +1.
+     *   단계 3 실행 TX는 pi.getVersion()+1 을 WHERE 조건으로 사용한다.
+     */
+    @Transactional
+    public boolean claimScheduled(PaymentInstruction pi) {
+        int updated = paymentInstructionMapper.claimScheduledForExecution(
+                pi.getPaymentInstructionId(), pi.getVersion());
+        if (updated == 0) {
+            return false;
+        }
+        Integer maxSeq = statusHistoryMapper.selectMaxSequence(pi.getPaymentInstructionId());
+        statusHistoryMapper.insert(StatusHistory.of(
+                idGenerator.nextHistoryId(), pi.getPaymentInstructionId(),
+                (maxSeq == null ? 0 : maxSeq) + 1,
+                "SCHEDULED", "PROCESSING", "SCHEDULED_TRIGGERED", "SCHEDULER",
+                LocalDateTime.now()));
+        return true;
+    }
+
+    /**
+     * AUTHORIZED→SCHEDULED 전이. is_scheduled=true + scheduled_execution_at 세팅.
+     * 낙관락: WHERE status='AUTHORIZED' AND version=#{version}. affected rows≠1 이면 throw.
+     * 상태이력: SCHEDULED_REGISTERED (AUTHORIZED→SCHEDULED, triggered_by='USER').
+     * @param piId 결제지시번호
+     * @param version authorize 직후 최신 버전 (pi.getVersion()+1)
+     * @param scheduledExecutionAt 예약실행시각 (미래 시각, 컨트롤러에서 검증 완료)
+     */
+    @Transactional
+    public void markScheduled(String piId, Integer version, LocalDateTime scheduledExecutionAt) {
+        LocalDateTime now = LocalDateTime.now();
+
+        int updated = paymentInstructionMapper.updateScheduled(piId, scheduledExecutionAt, version);
+        if (updated == 0) {
+            throw new OptimisticLockingFailureException(
+                    "결제지시 SCHEDULED 전이 충돌(낙관락/상태 불일치): " + piId);
+        }
+
+        Integer maxSeq = statusHistoryMapper.selectMaxSequence(piId);
+        int seq = (maxSeq == null ? 0 : maxSeq) + 1;
+        StatusHistory history = StatusHistory.of(
+                idGenerator.nextHistoryId(), piId, seq,
+                "AUTHORIZED", "SCHEDULED", "SCHEDULED_REGISTERED", "USER", now);
+        statusHistoryMapper.insert(history);
+    }
+
+    /**
+     * 사용자 예약취소. SCHEDULED→CANCELED + SCHEDULED_CANCELED 이력.
+     * claim 과 대칭: WHERE status='SCHEDULED' AND version=? 조건부 UPDATE.
+     * affected=0 = 그새 claim 되거나 이미 취소됨 → PaymentCancelConflictException(409).
+     */
+    @Transactional
+    public void cancelScheduled(String piId, Integer version, String reason) {
+        LocalDateTime now = LocalDateTime.now();
+
+        int updated = paymentInstructionMapper.cancelScheduledForUser(piId, version);
+        if (updated == 0) {
+            throw new com.bank.payment.common.exception.PaymentCancelConflictException(
+                    "SCHEDULED 상태 전이 충돌(claim 경합 또는 이미 취소): " + piId);
+        }
+
+        Integer maxSeq = statusHistoryMapper.selectMaxSequence(piId);
+        int seq = (maxSeq == null ? 0 : maxSeq) + 1;
+        StatusHistory history = StatusHistory.of(
+                idGenerator.nextHistoryId(), piId, seq,
+                "SCHEDULED", "CANCELED", "SCHEDULED_CANCELED", "USER",
+                null, reason,
+                now);
+        statusHistoryMapper.insert(history);
+    }
+
+    /** AUTHORIZED→PROCESSING 전이: updateStatus(낙관락) + PROCESSING_STARTED 이력. txStep4 3종 공용. */
+    private void markProcessing(String piId, int version, LocalDateTime now) {
+        int updated = paymentInstructionMapper.updateStatus(piId, "PROCESSING", null, null, version);
+        if (updated == 0) {
+            throw new OptimisticLockingFailureException("결제지시 상태 갱신 충돌(PROCESSING): " + piId);
+        }
+        Integer maxSeq = statusHistoryMapper.selectMaxSequence(piId);
+        statusHistoryMapper.insert(StatusHistory.of(
+                idGenerator.nextHistoryId(), piId, (maxSeq == null ? 0 : maxSeq) + 1,
+                "AUTHORIZED", "PROCESSING", "PROCESSING_STARTED", "SYSTEM", now));
     }
 
     /** PI 재조회 — 이중보상 가드용. 보상 진입 직전 현재 상태 확인. */
@@ -622,13 +795,16 @@ public class PaymentTransactionService {
     }
 
     /**
-     * TX-SETTLEMENT (S2-A 완결): CLEARING→COMPLETED 한 트랜잭션.
-     * 1. PI CLEARING→COMPLETED (version 3→4, completedAt=now)
-     * 2. CT clearing_status REQUESTED→SETTLED + settled_at/settlement_date (counterparty NULL — P-015 OUT 미적용)
-     * 3. 상태이력: seq5 KFTC_SETTLED(CLEARING→CLEARING, KFTC) + seq6 PAYMENT_COMPLETED(CLEARING→COMPLETED, SYSTEM)
-     * 4. Outbox: KFTC_SETTLED(회계계 P-001 unwind 트리거) + PAYMENT_COMPLETED
-     * ★청산대기 역분개는 회계계 책임(P-001). 우리 ledger CLEARING_PENDING 그대로.
-     * ★completeIntra 미사용 — isIntraBank 가드로 타행 호출 불가. updateStatus 직접 호출.
+     * TX-SETTLEMENT (S2-A 통지 수신): KFTC 차액결제 이연 — PI CLEARING 유지, CT SETTLED.
+     * 1. CT clearing_status REQUESTED→SETTLED + settled_at/settlement_date
+     *    (마감배치가 CT.clearing_status=SETTLED + PI.status=CLEARING 조합으로 처리 대상 식별)
+     * 2. next_timeout_at = NULL — SETTLED 후 마감 대기 중 TimeoutDetectionWorker 오판 방지
+     *    (selectTimedOut: next_timeout_at IS NOT NULL AND status='CLEARING' → null이면 미해당)
+     * 3. 상태이력: seq5 KFTC_SETTLED (CLEARING→CLEARING, KFTC)
+     * 4. Outbox KFTC_SETTLED (회계계 P-001 CLEARING_PENDING unwind + 마감배치 트리거용)
+     * ★ PI 상태 CLEARING 그대로 유지 — COMPLETED 전이 + 분개 unwind는 마감배치(Step 6)가 수행.
+     * ★ version 갱신 없음 — PI 상태 변경 없으므로 낙관락 불필요.
+     * ★ BOK txSettlementBok(RTGS 즉시 COMPLETED)와 달리 CLEARING 이연. 건드리지 말 것.
      */
     @Transactional
     public void txSettlement(PaymentInstruction pi, String clearingNo,
@@ -636,14 +812,12 @@ public class PaymentTransactionService {
         LocalDateTime now = LocalDateTime.now();
         String piId = pi.getPaymentInstructionId();
 
-        // 1. PI CLEARING→COMPLETED (낙관락: pi.getVersion()=3 → WHERE v=3, SET v=4)
-        int updated = paymentInstructionMapper.updateStatus(piId, "COMPLETED", now, null, pi.getVersion());
-        if (updated == 0) {
-            throw new OptimisticLockingFailureException("SETTLEMENT 상태갱신 충돌: " + piId);
-        }
-
-        // 2. CT REQUESTED→SETTLED (counterparty_payment_id=NULL — input에 없음, P-015 OUT 미적용)
+        // 1. CT REQUESTED→SETTLED (settled_at/settlement_date 기록 — 마감배치 조회 기준)
         clearingTransactionMapper.updateSettled(piId, settledAt, settlementDate);
+
+        // 2. next_timeout_at = NULL (CLEARING 유지 상태로 마감 대기 — 타임아웃 폴러 오판 방지)
+        //    updateStatus를 거치지 않으므로 자동 NULL화 없음 → 명시적 클리어 필수
+        paymentInstructionMapper.updateNextTimeoutAt(piId, null);
 
         // 3. 상태이력 seq5: KFTC_SETTLED (CLEARING→CLEARING, 상태 유지 — 청산완료 이벤트 기록)
         Integer maxSeq = statusHistoryMapper.selectMaxSequence(piId);
@@ -652,12 +826,7 @@ public class PaymentTransactionService {
                 idGenerator.nextHistoryId(), piId, seq,
                 "CLEARING", "CLEARING", "KFTC_SETTLED", "KFTC", now));
 
-        // 4. 상태이력 seq6: PAYMENT_COMPLETED (CLEARING→COMPLETED)
-        statusHistoryMapper.insert(StatusHistory.of(
-                idGenerator.nextHistoryId(), piId, seq + 1,
-                "CLEARING", "COMPLETED", "PAYMENT_COMPLETED", "SYSTEM", now));
-
-        // 5. Outbox KFTC_SETTLED — 먼저 INSERT (회계계 P-001 CLEARING_PENDING unwind 트리거)
+        // 4. Outbox KFTC_SETTLED (회계계 P-001 CLEARING_PENDING unwind 트리거 + 마감배치 SETTLEMENT_NOTIFY 이벤트)
         String kftcSettledPayload;
         try {
             kftcSettledPayload = objectMapper.writeValueAsString(Map.of(
@@ -672,29 +841,17 @@ public class PaymentTransactionService {
         }
         outboxMessageMapper.insert(OutboxMessage.of(
                 idGenerator.nextMessageId(), piId, "KFTC_SETTLED", "v1", kftcSettledPayload, now));
-
-        // 6. Outbox PAYMENT_COMPLETED — 나중 INSERT (message_id 단조증가 → 워커 ORDER BY message_id로 순서 보장)
-        String paymentCompletedPayload;
-        try {
-            paymentCompletedPayload = objectMapper.writeValueAsString(Map.of(
-                    "paymentInstructionId", piId,
-                    "status", "COMPLETED",
-                    "transferAmount", pi.getTransferAmount(),
-                    "completedAt", now.toString()));
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Outbox payload 직렬화 실패(PAYMENT_COMPLETED): " + piId, e);
-        }
-        outboxMessageMapper.insert(OutboxMessage.of(
-                idGenerator.nextMessageId(), piId, "PAYMENT_COMPLETED", "v1", paymentCompletedPayload, now));
     }
 
     /**
      * TX-SETTLEMENT-BOK (S3 완결): CLEARING→COMPLETED 한 트랜잭션.
      * 1. PI CLEARING→COMPLETED (version 3→4, completedAt=now)
      * 2. BST settlement_status REQUESTED→SETTLED + settled_at/settlement_date
+     * 2.5. BOK RTGS 한은당좌 unwind 분개 쌍 INSERT (CLEARING_PENDING_UNWIND + INTERBANK_SETTLEMENT)
+     *      — 원분개 CLEARING_PENDING(KB-CLR-BOK)에서 accountId/snap/holder/amount/currency/일자 계승
+     *      — journal_no 균형: clearingPendingUnwind.amount == bokDda.amount == clearingOrig.amount
      * 3. 상태이력: BOK_CONFIRMED(CLEARING→CLEARING, BOK) + PAYMENT_COMPLETED(CLEARING→COMPLETED, SYSTEM)
-     * 4. Outbox: BOK_CONFIRMED(먼저, 회계계 P-001 unwind 트리거) + PAYMENT_COMPLETED(나중)
-     * txSettlement의 BOK판 — 대칭. version WHERE pi.getVersion()(=3) 동일.
+     * 4. Outbox: BOK_CONFIRMED(먼저) + PAYMENT_COMPLETED(나중)
      */
     @Transactional
     public void txSettlementBok(PaymentInstruction pi, String bokReferenceNo,
@@ -710,6 +867,27 @@ public class PaymentTransactionService {
 
         // 2. BST REQUESTED→SETTLED (counterparty_payment_id=NULL — P-015 OUT 미적용)
         settlementTransactionMapper.updateSettled(piId, settledAt, settlementDate);
+
+        // 2.5. BOK RTGS 한은당좌 unwind 분개 쌍 — 원분개 CLEARING_PENDING(KB-CLR-BOK) 계승
+        List<Ledger> originals = ledgerMapper.selectOriginalsByPaymentId(piId);
+        Ledger clearingOrig = originals.stream()
+                .filter(l -> "CLEARING_PENDING".equals(l.getJournalType()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("BOK 청산대기 원분개 없음: " + piId));
+        String jnSettlement = idGenerator.nextJournalNo();
+        ledgerMapper.insert(Ledger.clearingPendingUnwind(
+                idGenerator.nextLedgerId(), piId,
+                clearingOrig.getAccountId(), clearingOrig.getAccountNoSnap(), clearingOrig.getHolderNameSnap(),
+                jnSettlement, clearingOrig.getAmount(),
+                clearingOrig.getCurrency(),
+                clearingOrig.getTransactionDate(), clearingOrig.getPostingDate(), clearingOrig.getValueDate(),
+                now, "BOK RTGS 한은당좌 정산 - 청산대기 해소"));
+        ledgerMapper.insert(Ledger.bokDda(
+                idGenerator.nextLedgerId(), piId,
+                jnSettlement, clearingOrig.getAmount(),
+                clearingOrig.getCurrency(),
+                clearingOrig.getTransactionDate(), clearingOrig.getPostingDate(), clearingOrig.getValueDate(),
+                now, "BOK RTGS 한은당좌 정산"));
 
         // 3. 상태이력: BOK_CONFIRMED (CLEARING→CLEARING, 상태 유지 — 한은 정산완료 이벤트 기록)
         Integer maxSeq = statusHistoryMapper.selectMaxSequence(piId);
@@ -856,10 +1034,9 @@ public class PaymentTransactionService {
                 .orElseThrow(() -> new IllegalStateException("원분개 FEE_INCOME 없음: " + piId));
 
         // R01 balance: B-5 응답잔액 박제 (null이면 0,0 fallback — chk_balance_before/after >= 0 만족)
-        BigDecimal r01BalanceBefore = (cancelResult != null)
-                ? BigDecimal.valueOf(cancelResult.balanceBefore()) : BigDecimal.ZERO;
-        BigDecimal r01BalanceAfter = (cancelResult != null)
-                ? BigDecimal.valueOf(cancelResult.balanceAfter()) : BigDecimal.ZERO;
+        // WithdrawCancelData.balanceBefore/After는 BigDecimal 직접 반환 — valueOf 래핑 불필요.
+        BigDecimal r01BalanceBefore = (cancelResult != null) ? cancelResult.balanceBefore() : BigDecimal.ZERO;
+        BigDecimal r01BalanceAfter  = (cancelResult != null) ? cancelResult.balanceAfter()  : BigDecimal.ZERO;
 
         // R01: 송신계좌 CREDIT REVERSAL_TRANSFER_OUT (jn1)
         Ledger r01 = Ledger.reversalTransferOut(
@@ -967,13 +1144,14 @@ public class PaymentTransactionService {
     }
 
     /**
-     * TX-A (F8 보상): AUTHORIZED→REVERSING 전이 + 이력 2건.
+     * TX-A (F8/F5 보상): fromStatus→REVERSING 전이 + 이력 2건.
      * 이력: SYSTEM_FAILURE_DETECTED(원인 감지) + COMPENSATION_STARTED(보상 시작).
-     * @param pi txStep1 직후 PI (version=0). WHERE version = pi.getVersion()+1 (authorize 후 1)
-     * @param version WHERE 조건 버전 (pi.getVersion()+1 = 1, DB version 1→2)
+     * @param pi      보상 대상 PI
+     * @param version WHERE 조건 버전 (updateStatus 낙관락)
+     * @param fromStatus 이력 from_status ("AUTHORIZED" = 즉시이체 F5/F8, "PROCESSING" = 예약이체 보상)
      */
     @Transactional
-    public void txMarkReversing(PaymentInstruction pi, Integer version) {
+    public void txMarkReversing(PaymentInstruction pi, Integer version, String fromStatus) {
         LocalDateTime now = LocalDateTime.now();
         String piId = pi.getPaymentInstructionId();
 
@@ -987,10 +1165,10 @@ public class PaymentTransactionService {
         int seq = (maxSeq == null ? 0 : maxSeq) + 1;
         statusHistoryMapper.insert(StatusHistory.of(
                 idGenerator.nextHistoryId(), piId, seq,
-                "AUTHORIZED", "REVERSING", "SYSTEM_FAILURE_DETECTED", "SYSTEM", now));
+                fromStatus, "REVERSING", "SYSTEM_FAILURE_DETECTED", "SYSTEM", now));
         statusHistoryMapper.insert(StatusHistory.of(
                 idGenerator.nextHistoryId(), piId, seq + 1,
-                "AUTHORIZED", "REVERSING", "COMPENSATION_STARTED", "SYSTEM", now));
+                fromStatus, "REVERSING", "COMPENSATION_STARTED", "SYSTEM", now));
     }
 
     /**
@@ -1049,28 +1227,28 @@ public class PaymentTransactionService {
      * @param failedEventType 상태이력 검증실패 이벤트 (BALANCE_CHECK_FAILED 등)
      */
     @Transactional
-    public PaymentResult txStepFail(PaymentInstruction pi, String failureCategory, String failedEventType) {
+    public PaymentResult txStepFail(PaymentInstruction pi, String failureCategory, String failedEventType, String fromStatus) {
         LocalDateTime now = LocalDateTime.now();
         String piId = pi.getPaymentInstructionId();
 
-        // 1. DRAFT→FAILED (낙관락: F1은 authorize 미거쳐 version=0 → FAILED version=1)
+        // 1. fromStatus→FAILED (낙관락)
         int updated = paymentInstructionMapper.updateStatus(
                 piId, "FAILED", now, failureCategory, pi.getVersion());
         if (updated == 0) {
             throw new OptimisticLockingFailureException("결제지시 상태 갱신 충돌(FAILED): " + piId);
         }
 
-        // 2. 상태이력 seq2: 검증실패 이벤트 (상태 DRAFT 유지, 원인 기록)
+        // 2. 상태이력 seq2: 검증실패 이벤트 (fromStatus 유지, 원인 기록)
         Integer maxSeq = statusHistoryMapper.selectMaxSequence(piId);
         int seq2 = (maxSeq == null ? 0 : maxSeq) + 1;
         statusHistoryMapper.insert(StatusHistory.of(
                 idGenerator.nextHistoryId(), piId, seq2,
-                "DRAFT", "DRAFT", failedEventType, "SYSTEM", now));
+                fromStatus, fromStatus, failedEventType, "SYSTEM", now));
 
-        // 3. 상태이력 seq3: PAYMENT_FAILED (DRAFT→FAILED 전이 확정)
+        // 3. 상태이력 seq3: PAYMENT_FAILED (fromStatus→FAILED 전이 확정)
         statusHistoryMapper.insert(StatusHistory.of(
                 idGenerator.nextHistoryId(), piId, seq2 + 1,
-                "DRAFT", "FAILED", "PAYMENT_FAILED", "SYSTEM", now));
+                fromStatus, "FAILED", "PAYMENT_FAILED", "SYSTEM", now));
 
         // 4. Outbox (PAYMENT_FAILED, PENDING) — Outbox 워커가 Kafka 발행
         String payload;
@@ -1217,8 +1395,8 @@ public class PaymentTransactionService {
                 idGenerator.nextLedgerId(), piId, pi.getReceiverAccountNo(),
                 journalNo, pi.getReceiverAccountNo(), pi.getReceiverHolderNameSnap(),
                 pi.getTransferAmount(),
-                BigDecimal.valueOf(depositTx.balanceBefore()),
-                BigDecimal.valueOf(depositTx.balanceAfter()),
+                depositTx.balanceBefore(),
+                depositTx.balanceAfter(),
                 "KRW", businessDate, businessDate, businessDate,
                 now, "타행이체 수신 입금",
                 senderAccountNo, senderBankCode, senderRealName);

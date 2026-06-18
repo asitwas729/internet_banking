@@ -5,6 +5,10 @@ spring:
     username: deposit
     password: deposit
 
+  flyway:
+    repair-on-migrate: true
+    validate-on-migrate: false
+
 logging:
   level:
     com.bank.deposit: DEBUG

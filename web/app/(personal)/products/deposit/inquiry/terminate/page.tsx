@@ -1,239 +1,465 @@
 'use client'
+import { KB_PRIMARY,KB_PRIMARY_BG,KB_PRIMARY_BORDER,KB_PRIMARY_SURFACE } from '@/lib/theme'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import DepositSidebar from '@/components/products/DepositSidebar'
+import { formatNumber, MOCK_BANKS } from '@/lib/mock-data'
+import {
+  DepositViewAccount,
+  fetchDepositAccountViewModels,
+  getCurrentDepositCustomerId,
+  terminateDepositContract,
+} from '@/lib/deposit-api'
+import MouseNumKeypad from '@/components/ui/MouseNumKeypad'
 
-const STEPS = ['1. 계좌조회/선택', '2. 해지계좌확인/정보입력', '3', '4', '+']
+type ReceiveMethod = 'internal' | 'external' | 'cash'
 
-const INSTALLMENT_ACCOUNTS = [
-  { no: '467307-04-023562', name: '주택청약종합저축', amount: '4,810,000', date: '2014.12.18', unit: '월/일' },
-]
-
-const FREE_ACCOUNTS = [
-  { no: '531089-04-274618', name: 'AX풀뱅크ONE통장-보통예금', amount: '17,807', date: '2019.10.28' },
-]
-
+const STEP_LABELS = ['계좌조회/선택', '해지계좌 확인', '완료']
 type Step = 1 | 2 | 3
-type SelectedAccount = { no: string; name: string }
 
 export default function DepositTerminatePage() {
-  const [step, setStep] = useState<Step>(1)
-  const [selected, setSelected] = useState<SelectedAccount | null>(null)
+  return (
+    <Suspense fallback={null}>
+      <TerminatePageInner />
+    </Suspense>
+  )
+}
+
+function TerminatePageInner() {
+  const searchParams = useSearchParams()
+  const preselectedId = searchParams.get('accountId')
+
+  const [step, setStep] = useState<Step>(preselectedId ? 2 : 1)
+  const [selected, setSelected] = useState<DepositViewAccount | null>(null)
+  const [joinedAccounts, setJoinedAccounts] = useState<DepositViewAccount[]>([])
   const [password, setPassword] = useState('')
   const [mouseInput, setMouseInput] = useState(false)
-  const [depositNo, setDepositNo] = useState('선택')
-  const [freeOpen, setFreeOpen] = useState(true)
-  const [installOpen, setInstallOpen] = useState(true)
+  const [mousePassword, setMousePassword] = useState('')
+  const [receiveMethod, setReceiveMethod] = useState<ReceiveMethod>('internal')
+  const [depositNo, setDepositNo] = useState('')
+  const [extBankCode, setExtBankCode] = useState('')
+  const [extAccountNo, setExtAccountNo] = useState('')
+  const [showBankModal, setShowBankModal] = useState(false)
+  const [depositOpen,        setDepositOpen]        = useState(true)
+  const [regularSavingsOpen, setRegularSavingsOpen] = useState(true)
+  const [freeSavingsOpen,    setFreeSavingsOpen]    = useState(true)
+  const [checkingOpen,       setCheckingOpen]       = useState(true)
+  const [subscriptionOpen,   setSubscriptionOpen]   = useState(true)
 
-  function handleTerminate(acc: SelectedAccount) {
+  useEffect(() => {
+    let fallbackAccounts: DepositViewAccount[] = []
+    try {
+      const raw = localStorage.getItem('joinedAccounts')
+      if (raw) fallbackAccounts = JSON.parse(raw)
+    } catch {}
+
+    let cancelled = false
+    async function loadAccounts() {
+      try {
+        const apiAccounts = await fetchDepositAccountViewModels(getCurrentDepositCustomerId())
+        if (!cancelled) {
+          const accounts = apiAccounts.length > 0 ? apiAccounts : fallbackAccounts
+          setJoinedAccounts(accounts)
+          if (preselectedId) {
+            const found = accounts.find(a => String(a.id) === preselectedId)
+            if (found) { setSelected(found); setStep(2) }
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setJoinedAccounts(fallbackAccounts)
+          if (preselectedId) {
+            const found = fallbackAccounts.find(a => String(a.id) === preselectedId)
+            if (found) { setSelected(found); setStep(2) }
+          }
+        }
+      }
+    }
+    loadAccounts()
+    return () => { cancelled = true }
+  }, [])
+
+  const allAccounts: DepositViewAccount[] = joinedAccounts
+  const pureDepositAccounts    = allAccounts.filter(a => a.type === '예금')
+  const regularSavingsAccounts = allAccounts.filter(a => a.type === '적금' && a.savingType === 'REGULAR')
+  const freeSavingsAccounts    = allAccounts.filter(a => a.type === '적금' && a.savingType === 'FREE')
+  const checkingAccounts       = allAccounts.filter(a => a.type === '입출금')
+  const subscriptionAccounts   = allAccounts.filter(a => a.type === '청약')
+
+  const totalBalance = allAccounts.reduce((s, a) => s + a.balance, 0)
+  const totalCount   = allAccounts.length
+
+  function handleSelect(acc: DepositViewAccount) {
     setSelected(acc)
     setStep(2)
   }
 
-  function handleConfirm() {
-    if (!password && !mouseInput) { alert('해지계좌 비밀번호를 입력해주세요.'); return }
+  async function handleConfirm() {
+    if (!(mouseInput ? mousePassword : password)) { alert('해지계좌 비밀번호를 입력해주세요.'); return }
+    if (receiveMethod === 'internal' && !depositNo) { alert('입금계좌를 선택해주세요.'); return }
+    if (receiveMethod === 'external' && (!extBankCode || !extAccountNo)) { alert('은행과 계좌번호를 입력해주세요.'); return }
+    if (selected) {
+      try {
+        if (selected.contractId) await terminateDepositContract(selected.contractId)
+        const terminatedBalance = selected.balance
+        let updated = joinedAccounts.filter(a => a.id !== selected.id)
+        if (receiveMethod === 'internal' && depositNo) {
+          // accountOverrides에 추가 — 계좌조회 페이지가 API 잔액 위에 합산
+          const overrides = JSON.parse(localStorage.getItem('accountOverrides') || '{}')
+          overrides[depositNo] = (overrides[depositNo] || 0) + terminatedBalance
+          localStorage.setItem('accountOverrides', JSON.stringify(overrides))
+          // in-memory도 반영 (localStorage fallback용)
+          updated = updated.map(a => a.id === depositNo
+            ? { ...a, balance: a.balance + terminatedBalance, availableBalance: a.availableBalance + terminatedBalance }
+            : a)
+        }
+        localStorage.setItem('joinedAccounts', JSON.stringify(updated))
+        setJoinedAccounts(updated)
+      } catch {}
+    }
     setStep(3)
   }
 
-  const stepBtnCls = (i: number) =>
-    i + 1 === step
-      ? 'px-4 py-1.5 text-[12px] font-bold text-white'
-      : 'px-4 py-1.5 text-[12px] text-kb-text-body border border-kb-border bg-white hover:bg-kb-beige-light'
+  function AccountRow({ acc }: { acc: DepositViewAccount }) {
+    return (
+      <tr className="border-b hover:bg-kb-primary-surface transition-colors" style={{ borderColor: KB_PRIMARY_BORDER }}>
+        <td className="px-4 py-3.5">
+          <p className="font-medium" style={{ color: KB_PRIMARY }}>{acc.number}</p>
+          <p className="text-[11px] text-kb-text-muted mt-0.5">신규일 {acc.createdAt}</p>
+        </td>
+        <td className="px-4 py-3.5 text-kb-text">{acc.name}</td>
+        <td className="px-4 py-3.5 text-right font-semibold" style={{ color: KB_PRIMARY }}>{formatNumber(acc.balance)}원</td>
+        <td className="px-4 py-3.5 text-right">
+          <div className="flex gap-1.5 justify-end">
+            <button
+              onClick={() => handleSelect(acc)}
+              className="px-4 py-1.5 text-[12px] font-bold text-white rounded-lg hover:opacity-85 transition-opacity"
+              style={{ backgroundColor: KB_PRIMARY }}>
+              해지
+            </button>
+            <button className="px-4 py-1.5 text-[12px] font-medium rounded-lg border transition-colors hover:bg-kb-primary-bg"
+              style={{ borderColor: KB_PRIMARY_BORDER, color: KB_PRIMARY }}>
+              해지상세조회
+            </button>
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
+  const rowStyle = "px-5 py-3.5 text-[13px]"
+  const labelStyle = "font-semibold text-kb-text w-[150px] whitespace-nowrap"
 
   return (
-    <div className="max-w-kb-container mx-auto px-6 py-6">
-      <div className="flex justify-end mb-3 text-[12px] text-kb-text-muted gap-1 items-center">
-        <span>개인뱅킹</span><span>›</span>
-        <span>금융상품</span><span>›</span>
-        <span>예금</span><span>›</span>
-        <Link href="/products/deposit/inquiry/terminate" className="hover:underline">예금해지</Link>
-        <span>›</span>
-        <Link href="#" className="text-kb-blue hover:underline">도움말</Link>
-      </div>
-
-      <div className="flex gap-6">
+    <div className="max-w-kb-container mx-auto px-6">
+      <div className="flex">
         <DepositSidebar />
 
-        <main className="flex-1 min-w-0">
-          <div className="flex items-center justify-between mb-5">
-            <h1 className="text-[20px] font-bold text-kb-text">예금해지</h1>
-            <div className="flex gap-1">
-              {STEPS.map((s, i) => (
-                <button key={s} className={stepBtnCls(i)}
-                  style={i + 1 === step ? { backgroundColor: '#5BC9A8' } : {}}>
-                  {s}
-                </button>
-              ))}
-            </div>
+        <main className="flex-1 pl-8 pt-6 pb-12">
+          <h1 className="text-[22px] font-bold text-kb-text mb-5">예금/적금 해지</h1>
+
+          {/* 단계 표시 */}
+          <div className="flex items-center gap-2 mb-6">
+            {STEP_LABELS.map((label, i) => (
+              <div key={i} className="flex items-center gap-2">
+                {i > 0 && <span className="text-kb-text-muted">›</span>}
+                <span
+                  className="text-[13px]"
+                  style={i + 1 === step
+                    ? { color: KB_PRIMARY, fontWeight: 700, borderBottom: '2px solid #0D5C47', paddingBottom: '2px' }
+                    : { color: '#9CA3AF' }}>
+                  STEP {i + 1}. {label}
+                </span>
+              </div>
+            ))}
           </div>
 
-          {/* STEP 1: 계좌조회/선택 */}
+          {/* STEP 1 */}
           {step === 1 && (
             <>
-              <div className="border border-kb-border bg-[#FAFAFA] px-4 py-3 mb-5 text-[12px] text-kb-text-body space-y-1">
-                {[
-                  '인터넷으로 해지 가능한 예금은 오른쪽 상단의 [도움말]을 참조하시기 바랍니다.',
-                  '해지예상조회를 이용하여 해지면 고객님의 해지계좌번호를 다시 한번 확인하여 선택하기 바랍니다.',
-                  <span key="r" className="text-[#E05555]">정약관련예금(분탁정약접저예금·정약부금·정약금·정약)과 장기주택마련저축은 추가사항이 필요한 상품으로 인터넷뱅킹을 통한 해지가 제한됩니다. (창구를 통한 해지는 가능합니다.)</span>,
-                ].map((n, i) => (
-                  <p key={i} className="flex gap-1.5"><span className="flex-shrink-0">-</span><span>{n}</span></p>
-                ))}
+              <div className="rounded-xl px-5 py-4 mb-5 text-[12px] space-y-1.5"
+                style={{ backgroundColor: KB_PRIMARY_SURFACE, border: '1px solid #E2F5EF' }}>
+                <p className="flex gap-1.5 text-kb-text-muted">
+                  <span className="flex-shrink-0">·</span>
+                  <span>인터넷으로 해지 가능한 예금은 우측 [도움말]을 참조하시기 바랍니다.</span>
+                </p>
+                <p className="flex gap-1.5 text-kb-text-muted">
+                  <span className="flex-shrink-0">·</span>
+                  <span>해지예상조회를 이용하여 해지 시 고객님의 해지계좌번호를 다시 한번 확인하여 선택하기 바랍니다.</span>
+                </p>
+                <p className="flex gap-1.5 font-medium" style={{ color: '#E05555' }}>
+                  <span className="flex-shrink-0">·</span>
+                  <span>청약관련예금과 장기주택마련저축은 추가사항이 필요한 상품으로 인터넷뱅킹을 통한 해지가 제한됩니다.</span>
+                </p>
               </div>
 
-              {/* 거치식 */}
-              <div className="border border-kb-border mb-3">
-                <button onClick={() => {}}
-                  className="flex items-center justify-between w-full px-4 py-3 bg-[#FAFAFA] border-b border-kb-border">
-                  <span className="text-[13px] font-bold text-kb-text">거치식 예금계좌</span>
-                  <span className="text-[11px] border border-kb-border px-3 py-1 bg-white hover:bg-kb-beige-light text-kb-text-muted">－</span>
-                </button>
-                <div className="px-4 py-3 text-[13px] text-kb-text-muted">조회하실 내역이 없습니다</div>
+              {/* 총 잔액 요약 */}
+              <div className="flex items-center justify-between mb-5 rounded-xl px-6 py-4"
+                style={{ backgroundColor: KB_PRIMARY_SURFACE, border: '1px solid #E2F5EF' }}>
+                <p className="text-[14px] font-bold text-kb-text">
+                  총 예금 잔액{' '}
+                  <span className="text-[18px]" style={{ color: KB_PRIMARY }}>{formatNumber(totalBalance)}</span>원
+                  <span className="text-kb-text-muted font-normal text-[13px] ml-1">({totalCount}계좌)</span>
+                </p>
               </div>
 
-              {/* 적립식 */}
-              <div className="border border-kb-border mb-3">
-                <button onClick={() => setInstallOpen(v => !v)}
-                  className="flex items-center justify-between w-full px-4 py-3 bg-[#FAFAFA] border-b border-kb-border">
-                  <span className="text-[13px] font-bold text-kb-text">적립식 예금계좌</span>
-                  <span className="text-[11px] border border-kb-border px-3 py-1 bg-white hover:bg-kb-beige-light text-kb-text-muted">{installOpen ? '－' : '＋'}</span>
-                </button>
-                {installOpen && (
-                  <table className="w-full border-collapse text-[13px]">
-                    <tbody>
-                      {INSTALLMENT_ACCOUNTS.map(acc => (
-                        <tr key={acc.no} className="border-t border-kb-border">
-                          <td className="px-4 py-3 text-kb-text-body">
-                            <p>{acc.no}</p>
-                            <p className="text-[11px] text-kb-text-muted mt-0.5">신규일 {acc.date} | {acc.unit}</p>
-                          </td>
-                          <td className="px-4 py-3 text-kb-text-body">{acc.name}</td>
-                          <td className="px-4 py-3 text-right text-kb-text-body font-medium">{acc.amount}원</td>
-                          <td className="px-4 py-3 text-right">
-                            <button className="border border-kb-border px-3 py-1.5 text-[12px] text-kb-text-body hover:bg-kb-beige-light">
-                              해지상세조회
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {/* 입출금이자유로운 */}
-              <div className="border border-kb-border mb-3">
-                <button onClick={() => setFreeOpen(v => !v)}
-                  className="flex items-center justify-between w-full px-4 py-3 bg-[#FAFAFA] border-b border-kb-border">
-                  <span className="text-[13px] font-bold text-kb-text">입출금이자유로운 예금계좌</span>
-                  <span className="text-[11px] border border-kb-border px-3 py-1 bg-white hover:bg-kb-beige-light text-kb-text-muted">{freeOpen ? '－' : '＋'}</span>
-                </button>
-                {freeOpen && (
-                  <table className="w-full border-collapse text-[13px]">
-                    <tbody>
-                      {FREE_ACCOUNTS.map(acc => (
-                        <tr key={acc.no} className="border-t border-kb-border">
-                          <td className="px-4 py-3 text-kb-text-body">
-                            <p>{acc.no}</p>
-                            <p className="text-[11px] text-kb-text-muted mt-0.5">신규일 {acc.date}</p>
-                          </td>
-                          <td className="px-4 py-3 text-kb-text-body">{acc.name}</td>
-                          <td className="px-4 py-3 text-right text-kb-text-body font-medium">{acc.amount}원</td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex gap-1 justify-end">
-                              <button
-                                onClick={() => handleTerminate(acc)}
-                                className="px-3 py-1.5 text-[12px] font-bold text-white hover:opacity-90"
-                                style={{ backgroundColor: '#5BC9A8' }}>
-                                해지
-                              </button>
-                              <button className="border border-kb-border px-3 py-1.5 text-[12px] text-kb-text-body hover:bg-kb-beige-light">
-                                해지상세조회
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+              {/* 섹션 공통 렌더 헬퍼 */}
+              {(
+                [
+                  { label: '예금',    accounts: pureDepositAccounts,    open: depositOpen,        toggle: () => setDepositOpen(v => !v) },
+                  { label: '정기적금', accounts: regularSavingsAccounts, open: regularSavingsOpen, toggle: () => setRegularSavingsOpen(v => !v) },
+                  { label: '자유적금', accounts: freeSavingsAccounts,    open: freeSavingsOpen,    toggle: () => setFreeSavingsOpen(v => !v) },
+                  { label: '입출금',  accounts: checkingAccounts,        open: checkingOpen,       toggle: () => setCheckingOpen(v => !v) },
+                  { label: '청약',    accounts: subscriptionAccounts,    open: subscriptionOpen,   toggle: () => setSubscriptionOpen(v => !v) },
+                ] as const
+              ).map(({ label, accounts, open, toggle }) => (
+                <div key={label} className="rounded-xl overflow-hidden mb-4" style={{ border: '1px solid #E2F5EF' }}>
+                  <button
+                    onClick={toggle}
+                    className="flex items-center justify-between w-full px-5 py-3.5"
+                    style={{ backgroundColor: KB_PRIMARY_BG, borderBottom: open ? '1px solid #E2F5EF' : 'none' }}>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: KB_PRIMARY }} />
+                      <span className="text-[14px] font-bold text-kb-text">{label}</span>
+                      <span className="text-[13px] text-kb-text-muted">({accounts.length}계좌)</span>
+                      <span className="text-[13px] font-semibold ml-1" style={{ color: KB_PRIMARY }}>
+                        잔액 {formatNumber(accounts.reduce((s, a) => s + a.balance, 0))}원
+                      </span>
+                    </div>
+                    <span className="text-[18px] text-kb-text-muted leading-none">{open ? '˄' : '˅'}</span>
+                  </button>
+                  {open && (
+                    accounts.length === 0 ? (
+                      <p className="px-5 py-5 text-[13px] text-kb-text-muted text-center">조회하실 내역이 없습니다.</p>
+                    ) : (
+                      <table className="w-full border-collapse text-[13px]">
+                        <thead>
+                          <tr style={{ backgroundColor: KB_PRIMARY_SURFACE }}>
+                            {['계좌번호', '상품명', '잔액', ''].map((h, i) => (
+                              <th key={i} className="px-4 py-2.5 text-[12px] font-semibold text-left"
+                                style={{ borderBottom: '1px solid #E2F5EF', color: KB_PRIMARY }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {accounts.map(acc => <AccountRow key={acc.id} acc={acc} />)}
+                        </tbody>
+                      </table>
+                    )
+                  )}
+                </div>
+              ))}
             </>
           )}
 
-          {/* STEP 2: 해지계좌확인/정보입력 */}
+          {/* STEP 2 */}
           {step === 2 && selected && (
             <>
-              <div className="border border-kb-border bg-[#FAFAFA] px-4 py-3 mb-5 text-[12px] text-kb-text-body">
-                <p className="flex gap-1.5"><span>-</span><span>입출금이자유로운예금 해지 시 당 본인계좌로 입금되며 입금될 계좌가 없거나 각종 자동이체 및 카드 결제과 등 연 결계좌로 사용되고 있을 경우 해지가 제한됩니다.(창구를 통한 해지는 가능합니다.)</span></p>
+              <div className="rounded-xl px-5 py-4 mb-5 text-[12px]"
+                style={{ backgroundColor: KB_PRIMARY_SURFACE, border: '1px solid #E2F5EF' }}>
+                <p className="flex gap-1.5 text-kb-text-muted">
+                  <span className="flex-shrink-0">·</span>
+                  <span>해지 시 잔액이 선택하신 방법으로 지급됩니다.</span>
+                </p>
               </div>
 
-              <table className="w-full border-collapse text-[13px] border-t-2 border-kb-text">
-                <tbody>
-                  <tr>
-                    <td className="bg-kb-beige-light border border-kb-border px-4 py-3 font-semibold text-kb-text w-[140px] whitespace-nowrap">해지계좌번호</td>
-                    <td className="border border-kb-border px-4 py-3 text-kb-text-body">{selected.no}</td>
-                  </tr>
-                  <tr>
-                    <td className="bg-kb-beige-light border border-kb-border px-4 py-3 font-semibold text-kb-text">해지계좌명</td>
-                    <td className="border border-kb-border px-4 py-3 text-kb-text-body">{selected.name}</td>
-                  </tr>
-                  <tr>
-                    <td className="bg-kb-beige-light border border-kb-border px-4 py-3 font-semibold text-kb-text">해지계좌비밀번호</td>
-                    <td className="border border-kb-border px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <input
-                          type={mouseInput ? 'text' : 'password'}
-                          value={password}
-                          onChange={e => setPassword(e.target.value)}
-                          maxLength={4}
-                          className="border border-kb-border px-3 py-1.5 text-[13px] w-28 outline-none"
-                        />
-                        <label className="flex items-center gap-1.5 text-[12px] text-kb-text-body cursor-pointer">
-                          <input type="checkbox" checked={mouseInput} onChange={e => setMouseInput(e.target.checked)} />
-                          마우스로 입력
-                        </label>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="bg-kb-beige-light border border-kb-border px-4 py-3 font-semibold text-kb-text">입금계좌번호</td>
-                    <td className="border border-kb-border px-4 py-3">
-                      <select value={depositNo} onChange={e => setDepositNo(e.target.value)}
-                        className="border border-kb-border px-3 py-1.5 text-[13px] outline-none bg-white">
-                        <option>-선택-</option>
-                        <option>531089-04-274618 (AX풀뱅크ONE통장)</option>
-                      </select>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+              <div className="rounded-xl overflow-hidden mb-4" style={{ border: '1px solid #E2F5EF' }}>
+                <table className="w-full border-collapse text-[13px]">
+                  <tbody>
+                    {[
+                      { label: '해지계좌번호', value: <span className="font-medium" style={{ color: KB_PRIMARY }}>{selected.number}</span> },
+                      { label: '해지계좌명',   value: selected.name },
+                      { label: '해지금액',     value: <span className="font-bold text-[15px]" style={{ color: KB_PRIMARY }}>{formatNumber(selected.balance)}원</span> },
+                    ].map(({ label, value }, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #E2F5EF' }}>
+                        <td className={`${rowStyle} ${labelStyle}`} style={{ backgroundColor: KB_PRIMARY_BG, width: 160 }}>{label}</td>
+                        <td className={rowStyle}>{value}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderBottom: '1px solid #E2F5EF' }}>
+                      <td className={`${rowStyle} ${labelStyle}`} style={{ backgroundColor: KB_PRIMARY_BG }}>해지계좌비밀번호</td>
+                      <td className={rowStyle}>
+                        <div className="flex flex-col gap-2">
+                          {mouseInput ? (
+                            <MouseNumKeypad value={mousePassword} onChange={setMousePassword} maxLength={4} dotCount={4} />
+                          ) : (
+                            <input
+                              type="password"
+                              value={password}
+                              onChange={e => setPassword(e.target.value)}
+                              maxLength={4}
+                              placeholder="4자리 입력"
+                              className="border rounded-lg px-3 py-1.5 text-[13px] w-28 outline-none focus:ring-1"
+                              style={{ borderColor: '#D1D5DB' }}
+                            />
+                          )}
+                          <label className="flex items-center gap-1.5 text-[12px] text-kb-text-muted cursor-pointer w-fit">
+                            <input type="checkbox" checked={mouseInput} onChange={e => { setMouseInput(e.target.checked); setMousePassword(''); setPassword('') }} />
+                            마우스로 입력
+                          </label>
+                        </div>
+                      </td>
+                    </tr>
+                    {/* 지급 방법 선택 */}
+                    <tr style={{ borderBottom: '1px solid #E2F5EF' }}>
+                      <td className={`${rowStyle} ${labelStyle}`} style={{ backgroundColor: KB_PRIMARY_BG }}>지급 방법</td>
+                      <td className={rowStyle}>
+                        <div className="flex gap-3">
+                          {([
+                            { value: 'internal', label: '당행 계좌' },
+                            { value: 'external', label: '타행 계좌' },
+                            { value: 'cash',     label: '현금' },
+                          ] as { value: ReceiveMethod; label: string }[]).map(opt => (
+                            <label key={opt.value} className="flex items-center gap-1.5 text-[13px] cursor-pointer">
+                              <input
+                                type="radio"
+                                name="receiveMethod"
+                                value={opt.value}
+                                checked={receiveMethod === opt.value}
+                                onChange={() => { setReceiveMethod(opt.value); setDepositNo(''); setExtBankCode(''); setExtAccountNo('') }}
+                              />
+                              {opt.label}
+                            </label>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                    {/* 당행: 내 계좌 선택 */}
+                    {receiveMethod === 'internal' && (
+                      <tr style={{ borderBottom: '1px solid #E2F5EF' }}>
+                        <td className={`${rowStyle} ${labelStyle}`} style={{ backgroundColor: KB_PRIMARY_BG }}>입금계좌</td>
+                        <td className={rowStyle}>
+                          <select
+                            value={depositNo}
+                            onChange={e => setDepositNo(e.target.value)}
+                            className="border rounded-lg px-3 py-1.5 text-[13px] outline-none bg-white"
+                            style={{ borderColor: '#D1D5DB' }}>
+                            <option value="">- 선택 -</option>
+                            {allAccounts.filter(a => a.id !== selected.id).map(a => (
+                              <option key={a.id} value={a.id}>{a.number} ({a.name}) · {formatNumber(a.balance)}원</option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    )}
+                    {/* 타행: 은행 선택 + 계좌번호 입력 */}
+                    {receiveMethod === 'external' && (
+                      <>
+                        <tr style={{ borderBottom: '1px solid #E2F5EF' }}>
+                          <td className={`${rowStyle} ${labelStyle}`} style={{ backgroundColor: KB_PRIMARY_BG }}>은행</td>
+                          <td className={rowStyle}>
+                            <button
+                              type="button"
+                              onClick={() => setShowBankModal(true)}
+                              className="border rounded-lg px-3 py-1.5 text-[13px] bg-white min-w-[120px] text-left"
+                              style={{ borderColor: '#D1D5DB', color: extBankCode ? '#111' : '#9CA3AF' }}>
+                              {extBankCode ? MOCK_BANKS.find(b => b.code === extBankCode)?.name ?? '은행 선택' : '은행 선택'}
+                            </button>
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #E2F5EF' }}>
+                          <td className={`${rowStyle} ${labelStyle}`} style={{ backgroundColor: KB_PRIMARY_BG }}>계좌번호</td>
+                          <td className={rowStyle}>
+                            <input
+                              type="text"
+                              value={extAccountNo}
+                              onChange={e => setExtAccountNo(e.target.value.replace(/\D/g, ''))}
+                              placeholder="계좌번호 입력 (숫자만)"
+                              className="border rounded-lg px-3 py-1.5 text-[13px] w-48 outline-none focus:ring-1"
+                              style={{ borderColor: '#D1D5DB' }}
+                            />
+                          </td>
+                        </tr>
+                      </>
+                    )}
+                    {/* 현금: 안내 문구 */}
+                    {receiveMethod === 'cash' && (
+                      <tr style={{ borderBottom: '1px solid #E2F5EF' }}>
+                        <td className={`${rowStyle} ${labelStyle}`} style={{ backgroundColor: KB_PRIMARY_BG }}>안내</td>
+                        <td className={`${rowStyle} text-kb-text-muted text-[12px]`}>
+                          해지 후 영업점 방문 시 현금으로 수령하실 수 있습니다.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-              <div className="flex justify-center mt-6">
+              {/* 타행 은행 선택 모달 */}
+              {showBankModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+                  onClick={() => setShowBankModal(false)}>
+                  <div className="bg-white rounded-2xl shadow-xl w-[360px] max-h-[70vh] overflow-y-auto p-5"
+                    onClick={e => e.stopPropagation()}>
+                    <h3 className="text-[15px] font-bold mb-4" style={{ color: KB_PRIMARY }}>은행 선택</h3>
+                    <div className="grid grid-cols-3 gap-2">
+                      {MOCK_BANKS.filter(b => b.code !== 'KB').map(bank => (
+                        <button
+                          key={bank.code}
+                          onClick={() => { setExtBankCode(bank.code); setShowBankModal(false) }}
+                          className="border rounded-lg py-2 text-[12px] font-medium transition-colors hover:bg-kb-primary-bg"
+                          style={{
+                            borderColor: extBankCode === bank.code ? KB_PRIMARY : '#E5E7EB',
+                            color: extBankCode === bank.code ? KB_PRIMARY : '#374151',
+                            backgroundColor: extBankCode === bank.code ? KB_PRIMARY_BG : 'white',
+                          }}>
+                          {bank.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-center gap-3">
+                <button
+                  onClick={() => setStep(1)}
+                  className="border rounded-xl px-12 py-3 text-[14px] font-medium transition-colors hover:bg-kb-primary-bg"
+                  style={{ borderColor: '#D1D5DB', color: '#6B7280' }}>
+                  이전
+                </button>
                 <button
                   onClick={handleConfirm}
-                  className="px-14 py-2.5 text-[14px] font-bold text-white hover:opacity-90"
-                  style={{ backgroundColor: '#5BC9A8' }}>
+                  className="px-12 py-3 text-[14px] font-bold text-white rounded-xl hover:opacity-85 transition-opacity"
+                  style={{ backgroundColor: KB_PRIMARY }}>
                   해지
                 </button>
               </div>
             </>
           )}
 
-          {/* STEP 3: 완료 */}
+          {/* STEP 3 */}
           {step === 3 && (
-            <div className="border border-kb-border py-16 text-center">
-              <p className="text-[16px] font-bold text-kb-text mb-3">예금 해지가 완료되었습니다.</p>
-              <p className="text-[13px] text-kb-text-muted mb-6">해지 결과는 해지결과/내역 조회에서 확인하실 수 있습니다.</p>
-              <Link href="/products/deposit/inquiry/terminate-result"
-                className="inline-block border border-kb-border px-8 py-2.5 text-[13px] text-kb-text-body hover:bg-kb-beige-light mr-2">
-                해지결과 조회
-              </Link>
-              <Link href="/products/deposit"
-                className="inline-block bg-kb-yellow px-8 py-2.5 text-[13px] font-bold text-kb-text hover:bg-kb-yellow-dark">
-                예금 상품 목록
-              </Link>
-            </div>
+            <>
+              <div className="rounded-xl p-6 mb-6 flex items-center gap-5"
+                style={{ backgroundColor: KB_PRIMARY_BG, border: '1px solid #E2F5EF' }}>
+                <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: KB_PRIMARY }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-[16px] font-bold mb-1" style={{ color: KB_PRIMARY }}>해지가 완료되었습니다.</p>
+                  <p className="text-[12px] text-kb-text-muted">해지 결과는 해지결과/내역 조회에서 확인하실 수 있습니다.</p>
+                </div>
+              </div>
+
+              <div className="flex justify-center gap-3">
+                <Link href="/products/deposit/inquiry/terminate-result"
+                  className="px-8 py-2.5 text-[14px] font-bold text-white rounded-xl hover:opacity-85 transition-opacity"
+                  style={{ backgroundColor: KB_PRIMARY }}>
+                  해지결과 조회
+                </Link>
+                <Link href="/inquiry/accounts"
+                  className="border rounded-xl px-8 py-2.5 text-[14px] font-medium transition-colors hover:bg-kb-primary-bg"
+                  style={{ borderColor: KB_PRIMARY_BORDER, color: KB_PRIMARY }}>
+                  계좌 조회
+                </Link>
+              </div>
+            </>
           )}
         </main>
       </div>

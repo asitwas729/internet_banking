@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 from app.config import Settings
+from app.metrics import chatbot_kafka_consume_total, chatbot_kafka_publish_total
 
 
 class KafkaEventPublisher:
@@ -36,14 +37,23 @@ class KafkaEventPublisher:
         """상담사 채팅 이벤트 토픽으로 발행."""
         await self._send(self._settings.kafka_topic_chat_events, event_type, payload)
 
+    async def publish_chatbot_message(self, payload: dict[str, Any]) -> None:
+        """챗봇 메시지 수신 토픽으로 발행."""
+        await self._send(self._settings.kafka_topic_chatbot_message, "ChatbotMessageReceived", payload)
+
     async def _send(self, topic: str, event_type: str, payload: dict[str, Any]) -> None:
         if not self._producer:
             return
         message = {"eventType": event_type, "payload": payload}
-        await self._producer.send_and_wait(
-            topic,
-            json.dumps(message, ensure_ascii=False, default=str).encode("utf-8"),
-        )
+        try:
+            await self._producer.send_and_wait(
+                topic,
+                json.dumps(message, ensure_ascii=False, default=str).encode("utf-8"),
+            )
+            chatbot_kafka_publish_total.labels(topic=topic, status="success").inc()
+        except Exception:
+            chatbot_kafka_publish_total.labels(topic=topic, status="error").inc()
+            raise
 
 
 class KafkaEventConsumer:
@@ -83,4 +93,10 @@ class KafkaEventConsumer:
         if not self._consumer:
             return
         async for msg in self._consumer:
-            yield json.loads(msg.value.decode("utf-8"))
+            try:
+                data = json.loads(msg.value.decode("utf-8"))
+                event_type = data.get("eventType", "UNKNOWN")
+                chatbot_kafka_consume_total.labels(event_type=event_type, status="success").inc()
+                yield data
+            except Exception:
+                chatbot_kafka_consume_total.labels(event_type="UNKNOWN", status="error").inc()

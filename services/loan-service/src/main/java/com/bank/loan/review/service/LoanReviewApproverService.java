@@ -4,6 +4,8 @@ import com.bank.common.audit.StatusChangeEvent;
 import com.bank.common.audit.StatusHistoryPublisher;
 import com.bank.common.persistence.CurrentActorProvider;
 import com.bank.common.web.BusinessException;
+import com.bank.loan.advisory.AdvisoryClient;
+import com.bank.loan.advisory.AdvisoryReportSummary;
 import com.bank.loan.application.domain.LoanApplication;
 import com.bank.loan.application.repository.LoanApplicationRepository;
 import com.bank.loan.notification.event.LoanApprovedEvent;
@@ -35,6 +37,7 @@ public class LoanReviewApproverService {
     private final StatusHistoryPublisher statusHistoryPublisher;
     private final CurrentActorProvider currentActor;
     private final ApplicationEventPublisher eventPublisher;
+    private final AdvisoryClient advisoryClient;
 
     /**
      * 승인자 최종 확정.
@@ -54,9 +57,16 @@ public class LoanReviewApproverService {
             throw new BusinessException(LoanErrorCode.LOAN_195);
         }
 
-        if (req.approverId().equals(review.getReviewerId())) {
+        // 4-eye 판정은 인증된 호출자(currentActorId)로만 한다. 요청 바디 값은 신뢰하지 않는다.
+        Long approverId = currentActor.currentActorId();
+        if (approverId == null || CurrentActorProvider.SYSTEM.equals(approverId)) {
             throw new BusinessException(LoanErrorCode.LOAN_196);
         }
+        if (approverId.equals(review.getReviewerId())) {
+            throw new BusinessException(LoanErrorCode.LOAN_196);
+        }
+
+        assertNoCriticalUnackedAdvisory(review.getRevId());
 
         boolean isOverride = LoanReview.APPROVER_OVERRIDE_APPROVED.equals(req.approverDecisionCd())
                 || LoanReview.APPROVER_OVERRIDE_REJECTED.equals(req.approverDecisionCd());
@@ -73,7 +83,7 @@ public class LoanReviewApproverService {
         String prevApplStatus = application.currentStatus();
 
         review.approverApprove(
-                req.approverId(),
+                approverId,
                 req.approverDecisionCd(),
                 req.overrideReasonCd(),
                 req.overrideRemark(),
@@ -114,6 +124,17 @@ public class LoanReviewApproverService {
         }
 
         return LoanReviewResponse.of(review);
+    }
+
+    private void assertNoCriticalUnackedAdvisory(Long revId) {
+        List<AdvisoryReportSummary> reports = advisoryClient.getReports(revId);
+        boolean hasUnackedCritical = reports.stream()
+                .filter(r -> "CRITICAL".equals(r.severityCd()))
+                .anyMatch(r -> !"ACKED".equals(r.advrStatusCd())
+                        && !"RESOLVED".equals(r.advrStatusCd()));
+        if (hasUnackedCritical) {
+            throw new BusinessException(LoanErrorCode.LOAN_201);
+        }
     }
 
     @Transactional(readOnly = true)

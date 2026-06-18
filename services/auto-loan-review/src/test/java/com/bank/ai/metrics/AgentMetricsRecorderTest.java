@@ -135,14 +135,86 @@ class AgentMetricsRecorderTest {
         assertThat(counter.count()).isEqualTo(1.0);
     }
 
-    // ── TC 6: RAG 메트릭 4종 — D4-1 ─────────────────────────────────────────
+    // ── TC 6: recordPerRunGuardCounts → DistributionSummary ─────────────────
 
     @Test
-    void recordRagSearchLatency_timerRecorded() {
+    void recordPerRunGuardCounts_success_summaryRecorded() {
+        recorder.recordPerRunGuardCounts(Track.TRACK_3, AgentOutcome.SUCCESS, 4, 1);
+        recorder.recordPerRunGuardCounts(Track.TRACK_3, AgentOutcome.SUCCESS, 6, 2);
+
+        var toolSummary = registry.find("ai.agent.tool.calls.per_run")
+                .tag(AgentMetricsTags.TRACK, "TRACK_3")
+                .tag(AgentMetricsTags.OUTCOME, "SUCCESS")
+                .summary();
+        assertThat(toolSummary).isNotNull();
+        assertThat(toolSummary.count()).isEqualTo(2);
+        assertThat(toolSummary.mean()).isEqualTo(5.0);
+
+        var llmSummary = registry.find("ai.agent.llm.calls.per_run")
+                .tag(AgentMetricsTags.TRACK, "TRACK_3")
+                .tag(AgentMetricsTags.OUTCOME, "SUCCESS")
+                .summary();
+        assertThat(llmSummary).isNotNull();
+        assertThat(llmSummary.count()).isEqualTo(2);
+        assertThat(llmSummary.mean()).isEqualTo(1.5);
+    }
+
+    @Test
+    void recordPerRunGuardCounts_fallback_separateFromSuccess() {
+        recorder.recordPerRunGuardCounts(Track.TRACK_3, AgentOutcome.SUCCESS, 5, 2);
+        recorder.recordPerRunGuardCounts(Track.TRACK_3, AgentOutcome.FALLBACK, 2, 0);
+
+        // SUCCESS 버킷은 count=1
+        var successSummary = registry.find("ai.agent.tool.calls.per_run")
+                .tag(AgentMetricsTags.TRACK, "TRACK_3")
+                .tag(AgentMetricsTags.OUTCOME, "SUCCESS")
+                .summary();
+        assertThat(successSummary).isNotNull();
+        assertThat(successSummary.count()).isEqualTo(1);
+
+        // FALLBACK 버킷도 독립 집계
+        var fallbackSummary = registry.find("ai.agent.tool.calls.per_run")
+                .tag(AgentMetricsTags.TRACK, "TRACK_3")
+                .tag(AgentMetricsTags.OUTCOME, "FALLBACK")
+                .summary();
+        assertThat(fallbackSummary).isNotNull();
+        assertThat(fallbackSummary.count()).isEqualTo(1);
+        assertThat(fallbackSummary.mean()).isEqualTo(2.0);
+    }
+
+    // ── TC 7: RAG 메트릭 5종 — E4-1 ─────────────────────────────────────────
+
+    @Test
+    void recordRagSearchLatency_phase_rrf_timerRecorded() {
+        recorder.recordRagSearchLatency("similar_cases", "rrf", Duration.ofMillis(80));
+
+        var timer = registry.find("rag.search.latency.seconds")
+                .tag(AgentMetricsTags.CORPUS, "similar_cases")
+                .tag(AgentMetricsTags.PHASE, "rrf")
+                .timer();
+        assertThat(timer).isNotNull();
+        assertThat(timer.count()).isEqualTo(1);
+    }
+
+    @Test
+    void recordRagSearchLatency_no_phase_defaults_to_all() {
         recorder.recordRagSearchLatency("policy_regulation", Duration.ofMillis(120));
 
         var timer = registry.find("rag.search.latency.seconds")
-                .tag(AgentMetricsTags.CORPUS, "policy_regulation").timer();
+                .tag(AgentMetricsTags.CORPUS, "policy_regulation")
+                .tag(AgentMetricsTags.PHASE, "all")
+                .timer();
+        assertThat(timer).isNotNull();
+        assertThat(timer.count()).isEqualTo(1);
+    }
+
+    @Test
+    void recordRagIndexLag_timerRecorded() {
+        recorder.recordRagIndexLag("similar_cases", Duration.ofSeconds(45));
+
+        var timer = registry.find("rag.index.lag.seconds")
+                .tag(AgentMetricsTags.CORPUS, "similar_cases")
+                .timer();
         assertThat(timer).isNotNull();
         assertThat(timer.count()).isEqualTo(1);
     }

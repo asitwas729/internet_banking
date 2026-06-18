@@ -11,6 +11,9 @@ import com.bank.loan.creditevaluation.repository.CreditEvaluationRepository;
 import com.bank.loan.dsr.domain.DsrCalculation;
 import com.bank.loan.dsr.repository.DsrCalculationRepository;
 import com.bank.loan.ltv.domain.LtvCalculation;
+import com.bank.loan.prescreening.client.AutoReviewEvaluateClient;
+import com.bank.loan.prescreening.client.AutoReviewEvaluateRequest;
+import com.bank.loan.prescreening.client.AutoReviewEvaluateResult;
 import com.bank.loan.product.domain.LoanProduct;
 import com.bank.loan.product.repository.LoanProductRepository;
 import com.bank.loan.review.domain.LoanReview;
@@ -25,9 +28,12 @@ import com.bank.loan.support.LoanErrorCode;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +43,7 @@ import java.util.List;
  * 결정 룰: CB.REJECT → REJECTED, DSR.FAIL → REJECTED, LTV.FAIL → REJECTED, 그 외 → APPROVED.
  * 권고는 PENDING_APPROVAL 로만 저장되며 confirm 시점에 신청 상태 전이.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class LoanReviewAutoDecideService {
@@ -68,6 +75,10 @@ public class LoanReviewAutoDecideService {
     private final CurrentActorProvider currentActor;
     private final NotificationOutboxAppender outboxAppender;
     private final ObjectMapper objectMapper;
+    private final AutoReviewEvaluateClient autoReviewEvaluateClient;
+
+    @Value("${loan.review.bias-check.enabled:true}")
+    private boolean biasCheckEnabled;
 
     @Transactional(readOnly = true)
     public List<LoanReviewResponse> listPending() {
@@ -100,6 +111,7 @@ public class LoanReviewAutoDecideService {
                 .orElseThrow(() -> new BusinessException(LoanErrorCode.LOAN_038, "dsr-calculation required"));
 
         preconditions.requireIdvPass(applId);
+        preconditions.requireDocumentsCleared(applId);
 
         LoanProduct product = productRepository.findByProdIdAndDeletedAtIsNull(application.getProdId())
                 .orElse(null);
@@ -125,6 +137,15 @@ public class LoanReviewAutoDecideService {
         }
 
         boolean approved = LoanReview.DECISION_APPROVED.equals(decision);
+
+        AutoReviewEvaluateResult aiResult = null;
+        try {
+            aiResult = autoReviewEvaluateClient.evaluate(
+                    buildAutoReviewRequest(application, ceval, dsr, chosenLtv, product));
+        } catch (Exception e) {
+            log.warn("auto-review evaluate 실패 applId={}, 룰 결정 계속 진행", applId, e);
+        }
+
         OffsetDateTime now = OffsetDateTime.now();
         Long actorId = currentActor.currentActorId();
 
@@ -152,6 +173,9 @@ public class LoanReviewAutoDecideService {
                 .reviewerId(null)
                 .reviewedAt(now)
                 .approvedAt(null)
+                .revAiTrackCd(aiResult != null ? aiResult.track() : null)
+                .revAiPd(aiResult != null ? aiResult.pd() : null)
+                .revAiRationale(aiResult != null ? aiResult.rationale() : null)
                 .build());
 
         checkLogWriter.logAuto(saved.getRevId(), ceval, dsr, chosenLtv, collateralRequired, approved, rejectReasonCd);
@@ -185,42 +209,53 @@ public class LoanReviewAutoDecideService {
         Long actorId = currentActor.currentActorId();
         boolean approved = review.isApproved();
 
+        // 확정 심사관은 인증 토큰(currentActorId)으로만 식별한다. 요청 바디 값은 받지 않는다.
         // confirm() 이 REVIEWER_DECIDED 로 전이 (reviewerId/reviewedAt 갱신 포함)
-        review.confirm(req.reviewerId(), now);
+        review.confirm(actorId, now);
 
-        checkLogWriter.logConfirm(review.getRevId(), approved, req.reviewerId(), req.confirmRemark());
+        checkLogWriter.logConfirm(review.getRevId(), approved, actorId, req.confirmRemark());
 
         // 심사원 확정 이력
         statusHistoryPublisher.publish(StatusChangeEvent.of(
                 DOMAIN_CD, TARGET_REVIEW, review.getRevId(),
                 LoanReview.STATUS_PENDING_APPROVAL, LoanReview.STATUS_REVIEWER_DECIDED,
                 REASON_REVIEW_CONFIRMED,
-                "reviewerId=" + req.reviewerId(),
+                "reviewerId=" + actorId,
                 actorId
         ));
 
-        // 편향 검증 단계 진입
-        review.markBiasReviewing();
-        statusHistoryPublisher.publish(StatusChangeEvent.of(
-                DOMAIN_CD, TARGET_REVIEW, review.getRevId(),
-                LoanReview.STATUS_REVIEWER_DECIDED, LoanReview.STATUS_BIAS_REVIEWING,
-                REASON_BIAS_CHECK_TRIGGERED, null, actorId
-        ));
-
-        enqueueBiasCheck(review, application);
-        String applBefore = application.currentStatus();
-        if (approved) {
-            application.markApproved();
+        if (biasCheckEnabled) {
+            review.markBiasReviewing();
+            statusHistoryPublisher.publish(StatusChangeEvent.of(
+                    DOMAIN_CD, TARGET_REVIEW, review.getRevId(),
+                    LoanReview.STATUS_REVIEWER_DECIDED, LoanReview.STATUS_BIAS_REVIEWING,
+                    REASON_BIAS_CHECK_TRIGGERED, null, actorId
+            ));
+            enqueueBiasCheck(review, application);
         } else {
-            application.markRejected();
+            review.markCompleted();
+            statusHistoryPublisher.publish(StatusChangeEvent.of(
+                    DOMAIN_CD, TARGET_REVIEW, review.getRevId(),
+                    LoanReview.STATUS_REVIEWER_DECIDED, LoanReview.STATUS_COMPLETED,
+                    REASON_REVIEW_CONFIRMED, null, actorId
+            ));
+            // bias 검증이 꺼진 경로에서만 심사관 확정으로 신청을 최종 전이한다.
+            // bias 검증이 켜진 경우 approver-approve(4-eye) 단계에서 신청을 확정하므로
+            // 여기서 markApproved/Rejected 를 호출하면 안 된다.
+            String applBefore = application.currentStatus();
+            if (approved) {
+                application.markApproved();
+            } else {
+                application.markRejected();
+            }
+            statusHistoryPublisher.publish(StatusChangeEvent.of(
+                    DOMAIN_CD, TARGET_APPLICATION, applId,
+                    applBefore, application.currentStatus(),
+                    approved ? REASON_REVIEW_APPROVED : REASON_REVIEW_REJECTED,
+                    "confirm, revId=" + review.getRevId(),
+                    actorId
+            ));
         }
-        statusHistoryPublisher.publish(StatusChangeEvent.of(
-                DOMAIN_CD, TARGET_APPLICATION, applId,
-                applBefore, application.currentStatus(),
-                approved ? REASON_REVIEW_APPROVED : REASON_REVIEW_REJECTED,
-                "confirm, revId=" + review.getRevId(),
-                actorId
-        ));
 
         return LoanReviewResponse.of(review);
     }
@@ -267,6 +302,32 @@ public class LoanReviewAutoDecideService {
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("bias-check payload 직렬화 실패 revId=" + review.getRevId(), e);
         }
+    }
+
+    private AutoReviewEvaluateRequest buildAutoReviewRequest(LoanApplication app,
+                                                              CreditEvaluation ceval,
+                                                              DsrCalculation dsr,
+                                                              LtvCalculation ltv,
+                                                              LoanProduct product) {
+        BigDecimal dsrRatio = dsr.getDsrRatioBps() != null
+                ? BigDecimal.valueOf(dsr.getDsrRatioBps()).movePointLeft(4)
+                : null;
+        BigDecimal ltvRatio = ltv != null && ltv.getLtvRatioBps() != null
+                ? BigDecimal.valueOf(ltv.getLtvRatioBps()).movePointLeft(4)
+                : null;
+        return new AutoReviewEvaluateRequest(
+                null,
+                app.getEstimatedIncomeAmt(),
+                app.getRequestedAmount(),
+                app.getRequestedPeriodMo(),
+                app.getLoanPurposeCd(),
+                app.getEmploymentTypeCd(),
+                ceval.getCevalScore(),
+                dsrRatio,
+                ltvRatio,
+                product != null ? product.getProdCd() : null,
+                null, null, null, null, null
+        );
     }
 
     /**

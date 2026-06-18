@@ -20,13 +20,15 @@ import static org.mockito.Mockito.*;
 
 class AgenticLoopTest {
 
+    static final int TEST_MAX_TURNS = 5;
+
     ObjectMapper objectMapper = new ObjectMapper();
     ToolAwareLlmClient llmClient = mock(ToolAwareLlmClient.class);
     AgenticLoop loop;
 
     @BeforeEach
     void setUp() {
-        loop = new AgenticLoop(llmClient, objectMapper);
+        loop = new AgenticLoop(llmClient, objectMapper, new AgenticLoopProperties(TEST_MAX_TURNS));
     }
 
     @Test
@@ -40,6 +42,7 @@ class AgenticLoopTest {
         assertThat(result.turnsUsed()).isEqualTo(1);
         assertThat(result.inputTokens()).isEqualTo(100);
         assertThat(result.outputTokens()).isEqualTo(80);
+        assertThat(result.timedOut()).isFalse();
         verify(llmClient, times(1)).completeWithTools(any(), any(), any());
     }
 
@@ -73,8 +76,23 @@ class AgenticLoopTest {
         AgenticLoopResult result = loop.run("system", "user msg", List.of(), tc -> "some result");
 
         assertThat(result.text()).contains("INSUFFICIENT_DATA");
-        assertThat(result.turnsUsed()).isEqualTo(AgenticLoop.MAX_TURNS);
-        verify(llmClient, times(AgenticLoop.MAX_TURNS)).completeWithTools(any(), any(), any());
+        assertThat(result.turnsUsed()).isEqualTo(TEST_MAX_TURNS);
+        assertThat(result.timedOut()).isTrue();
+        verify(llmClient, times(TEST_MAX_TURNS)).completeWithTools(any(), any(), any());
+    }
+
+    @Test
+    void maxTurns_설정값이_작으면_해당_턴에_폴백() {
+        ToolCall call = new ToolCall("id-t", "get_policy_citation", objectMapper.createObjectNode());
+        when(llmClient.completeWithTools(any(), any(), any()))
+                .thenReturn(toolUseResponse(call, 50, 30));
+
+        var tightLoop = new AgenticLoop(llmClient, objectMapper, new AgenticLoopProperties(2));
+        AgenticLoopResult result = tightLoop.run("system", "user msg", List.of(), tc -> "result");
+
+        assertThat(result.timedOut()).isTrue();
+        assertThat(result.turnsUsed()).isEqualTo(2);
+        verify(llmClient, times(2)).completeWithTools(any(), any(), any());
     }
 
     @Test
@@ -98,6 +116,30 @@ class AgenticLoopTest {
         String messagesJson = secondCallMessages.toString();
         assertThat(messagesJson).contains("tool_execution_failed");
         assertThat(messagesJson).contains("get_reviewer_history");
+    }
+
+    @Test
+    void tool_결과에_PII_포함_시_LLM_메시지에_마스킹되어_전달() {
+        ToolCall call = new ToolCall("id-pii", "get_reviewer_history", objectMapper.createObjectNode());
+        ArgumentCaptor<ArrayNode> captor = ArgumentCaptor.forClass(ArrayNode.class);
+
+        when(llmClient.completeWithTools(any(), captor.capture(), any()))
+                .thenReturn(toolUseResponse(call, 50, 30))
+                .thenReturn(endTurnResponse("결론", 100, 70));
+
+        loop.run("system", "user msg", List.of(), tc ->
+                "심사관 홍길동씨 주민번호 901010-1234567 전화번호 010-1234-5678 승인율 72%");
+
+        // 두 번째 LLM 호출(tool_result 포함)에서 PII 가 마스킹됐어야 한다
+        ArrayNode secondMessages = captor.getAllValues().get(1);
+        String json = secondMessages.toString();
+        assertThat(json).doesNotContain("901010-1234567");
+        assertThat(json).doesNotContain("010-1234-5678");
+        assertThat(json).doesNotContain("홍길동씨");
+        assertThat(json).contains("[RRN]");
+        assertThat(json).contains("[PHONE]");
+        assertThat(json).contains("[NAME]");
+        assertThat(json).contains("72%");   // 비PII 원문 유지
     }
 
     @Test

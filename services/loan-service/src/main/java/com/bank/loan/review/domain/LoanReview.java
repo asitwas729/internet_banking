@@ -13,6 +13,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
 /**
@@ -51,6 +52,7 @@ public class LoanReview extends BaseEntity {
     public static final String STATUS_PENDING_APPROVER  = "PENDING_APPROVER";
     public static final String STATUS_COMPLETED         = "COMPLETED";
     public static final String STATUS_EXPIRED           = "EXPIRED";
+    public static final String STATUS_ESCALATED_TO_HQ   = "ESCALATED_TO_HQ";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -119,6 +121,21 @@ public class LoanReview extends BaseEntity {
 
     @Column(name = "pending_approver_since")
     private OffsetDateTime pendingApproverSince;
+
+    @Column(name = "rev_ai_track_cd", length = 20)
+    private String revAiTrackCd;
+
+    @Column(name = "rev_ai_pd", precision = 10, scale = 6)
+    private BigDecimal revAiPd;
+
+    @Column(name = "rev_ai_rationale", columnDefinition = "TEXT")
+    private String revAiRationale;
+
+    @Column(name = "owner_id")
+    private Long ownerId;
+
+    @Column(name = "escalated_at")
+    private OffsetDateTime escalatedAt;
 
     public boolean isApproved() {
         return DECISION_APPROVED.equals(revDecisionCd);
@@ -220,6 +237,10 @@ public class LoanReview extends BaseEntity {
         this.approvedAt = DECISION_APPROVED.equals(this.revDecisionCd) ? decidedAt : null;
     }
 
+    public void markCompleted() {
+        this.revStatusCd = STATUS_COMPLETED;
+    }
+
     /**
      * BIAS_REVIEWING 상태의 본심사가 기한 내 진행되지 않아 만료.
      */
@@ -259,6 +280,16 @@ public class LoanReview extends BaseEntity {
      */
     public void expire() {
         this.revStatusCd = STATUS_EXPIRED;
+    }
+
+    public boolean isEscalated() {
+        return escalatedAt != null;
+    }
+
+    /** 이상거래 본사 상신. escalated_at 기록 + 상태 전이. */
+    public void escalateToHq(OffsetDateTime at) {
+        this.escalatedAt = at;
+        this.revStatusCd = STATUS_ESCALATED_TO_HQ;
     }
 
     /**

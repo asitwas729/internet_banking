@@ -23,9 +23,13 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 /**
  * 약정한도 설정 서비스.
@@ -149,6 +153,22 @@ public class LoanContractService {
         ));
 
         return LoanContractResponse.of(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<LoanContractResponse> listForAdmin(
+            String cntrStatusCd, String dateFrom, String dateTo, int page, int size) {
+        return repository
+                .findForAdmin(cntrStatusCd, dateFrom, dateTo, PageRequest.of(page, size))
+                .map(LoanContractResponse::of);
+    }
+
+    @Transactional(readOnly = true)
+    public List<LoanContractResponse> list(Long customerId) {
+        return repository.findByCustomerIdAndDeletedAtIsNullOrderByCntrIdDesc(customerId)
+                .stream()
+                .map(LoanContractResponse::of)
+                .toList();
     }
 
     @Transactional(readOnly = true)

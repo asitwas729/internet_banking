@@ -13,6 +13,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
 @Entity
@@ -90,6 +91,14 @@ public class Account extends BaseEntity {
     @Column(name = "atm_withdraw_limit", precision = 18, scale = 2)
     private BigDecimal atmWithdrawLimit;
 
+    @Column(name = "fraud_flag", nullable = false)
+    @Builder.Default
+    private Boolean fraudFlag = false;
+
+    @Column(name = "hold_amount", precision = 18, scale = 2, nullable = false)
+    @Builder.Default
+    private BigDecimal holdAmount = BigDecimal.ZERO;
+
     @Column(name = "is_withdrawable", nullable = false)
     @Builder.Default
     private Boolean isWithdrawable = true;
@@ -111,23 +120,36 @@ public class Account extends BaseEntity {
     @Builder.Default
     private AccountStatus accountStatus = AccountStatus.ACTIVE;
 
-    @Column(name = "opened_at", columnDefinition = "CHAR(8)", nullable = false)
-    private String openedAt;
+    @Column(name = "opened_at", columnDefinition = "DATE", nullable = false)
+    private LocalDate openedAt;
 
-    @Column(name = "maturity_at", columnDefinition = "CHAR(8)")
-    private String maturityAt;
+    @Column(name = "maturity_at", columnDefinition = "DATE")
+    private LocalDate maturityAt;
 
-    @Column(name = "dormant_at", columnDefinition = "CHAR(8)")
-    private String dormantAt;
+    @Column(name = "dormant_at", columnDefinition = "DATE")
+    private LocalDate dormantAt;
 
-    @Column(name = "dormant_released_at", columnDefinition = "CHAR(8)")
-    private String dormantReleasedAt;
+    @Column(name = "dormant_released_at", columnDefinition = "DATE")
+    private LocalDate dormantReleasedAt;
 
-    @Column(name = "closed_at", columnDefinition = "CHAR(8)")
-    private String closedAt;
+    @Column(name = "closed_at", columnDefinition = "DATE")
+    private LocalDate closedAt;
 
-    @Column(name = "status_changed_at", columnDefinition = "CHAR(8)")
-    private String statusChangedAt;
+    @Column(name = "status_changed_at", columnDefinition = "DATE")
+    private LocalDate statusChangedAt;
+
+    @PrePersist
+    @PreUpdate
+    private void validatePasswordHash() {
+        if (accountPassword == null || accountPassword.isBlank()) {
+            throw new IllegalStateException("Account password hash is required.");
+        }
+        if (!accountPassword.startsWith("$2a$")
+                && !accountPassword.startsWith("$2b$")
+                && !accountPassword.startsWith("$2y$")) {
+            throw new IllegalStateException("Account password must be stored as a BCrypt hash.");
+        }
+    }
 
     public void deposit(BigDecimal amount) {
         this.balance = this.balance.add(amount);
@@ -140,7 +162,8 @@ public class Account extends BaseEntity {
     }
 
     public void withdraw(BigDecimal amount) {
-        if (this.balance.compareTo(amount) < 0) {
+        BigDecimal available = this.balance.subtract(this.holdAmount != null ? this.holdAmount : BigDecimal.ZERO);
+        if (available.compareTo(amount) < 0) {
             throw new com.bank.deposit.exception.BusinessException(
                     com.bank.deposit.exception.ErrorCode.INSUFFICIENT_BALANCE);
         }
@@ -149,7 +172,8 @@ public class Account extends BaseEntity {
     }
 
     public void withdraw(BigDecimal amount, Clock clock) {
-        if (this.balance.compareTo(amount) < 0) {
+        BigDecimal available = this.balance.subtract(this.holdAmount != null ? this.holdAmount : BigDecimal.ZERO);
+        if (available.compareTo(amount) < 0) {
             throw new com.bank.deposit.exception.BusinessException(
                     com.bank.deposit.exception.ErrorCode.INSUFFICIENT_BALANCE);
         }
@@ -164,5 +188,29 @@ public class Account extends BaseEntity {
         this.lastTransactionAt = OffsetDateTime.now();
     }
 
+    public void addInterest(BigDecimal amount, Clock clock) {
+        this.balance = this.balance.add(amount);
+        this.totalInterestAmount = this.totalInterestAmount.add(amount);
+        this.lastInterestPaidAt = OffsetDateTime.now(clock);
+        this.lastTransactionAt = OffsetDateTime.now(clock);
+    }
+
     public void addPaidAmount(BigDecimal amount) {
-        this.totalPaidAmount = this.totalPaidAmount.add
+        this.totalPaidAmount = this.totalPaidAmount.add(amount);
+    }
+
+    public void changeStatus(AccountStatus status, LocalDate statusChangedAt) {
+        this.accountStatus = status;
+        this.statusChangedAt = statusChangedAt;
+    }
+
+    public void updateAlias(String alias) {
+        this.accountAlias = alias;
+    }
+
+    public void updateLimits(BigDecimal dailyWithdrawLimit, Integer dailyWithdrawCountLimit, BigDecimal atmWithdrawLimit) {
+        this.dailyWithdrawLimit = dailyWithdrawLimit;
+        this.dailyWithdrawCountLimit = dailyWithdrawCountLimit;
+        this.atmWithdrawLimit = atmWithdrawLimit;
+    }
+}

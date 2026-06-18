@@ -1,4 +1,5 @@
-'use client'
+﻿'use client'
+import { KB_MINT } from '@/lib/theme'
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -14,7 +15,7 @@ const SLIDES: SlideItem[][] = [
       iconBg: '#E879A0',
     },
     {
-      title: 'AX풀뱅크 특별출연\n수출입금융 지원안내',
+      title: 'AXful Bank 특별출연\n수출입금융 지원안내',
       desc: '수출입 중소·중견기업\n지원을 위한!',
       icon: '🧾',
       iconBg: '#7B9DC8',
@@ -23,7 +24,7 @@ const SLIDES: SlideItem[][] = [
       title: 'AXful System',
       desc: '신속·정확·편리한 재무\n및 세무정보 전송 네트워크',
       icon: '💲',
-      iconBg: '#5BC9A8',
+      iconBg: KB_MINT,
     },
   ],
   [
@@ -57,7 +58,7 @@ const SLIDES: SlideItem[][] = [
       title: 'ONE AXful\n기업우대대출',
       desc: '대출신청 대상 간소화,\n대출기간 및 상환방식의\n다각화, 우대서비스 제공',
       icon: '🏦',
-      iconBg: '#5BC9A8',
+      iconBg: KB_MINT,
     },
     {
       title: 'AXful기업대표상품',

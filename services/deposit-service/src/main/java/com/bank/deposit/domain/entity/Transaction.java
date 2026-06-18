@@ -10,6 +10,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 
 @Entity
@@ -26,6 +27,9 @@ public class Transaction extends BaseEntity {
 
     @Column(name = "transaction_number", length = 50, nullable = false, unique = true)
     private String transactionNumber;
+
+    @Column(name = "idempotency_key", length = 64)
+    private String idempotencyKey;
 
     @Column(name = "account_id", nullable = false)
     private Long accountId;
@@ -180,5 +184,10 @@ public class Transaction extends BaseEntity {
     public void cancel() {
         this.status = TransactionStatus.CANCELED;
         this.canceledAt = OffsetDateTime.now();
+    }
+
+    public void cancel(Clock clock) {
+        this.status = TransactionStatus.CANCELED;
+        this.canceledAt = OffsetDateTime.now(clock);
     }
 }

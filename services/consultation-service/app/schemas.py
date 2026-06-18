@@ -41,6 +41,8 @@ class ChatbotMessageResponse(BaseModel):
     buttons: list[ButtonResponse] = Field(default_factory=list)
     process_method: str = "SCENARIO"
     agent_transfer_required: bool = False
+    feature_code: str | None = None
+    feature_data: list[dict] = Field(default_factory=list)
 
 
 class ScenarioSeedResponse(BaseModel):
@@ -74,7 +76,12 @@ class ChatbotFeatureExecuteRequest(BaseModel):
     product_id: int | None = None
     compare_product_ids: list[int] = Field(default_factory=list)
     staff_id: str | None = None
-    chatbot_consultation_id: int | None = None  # 대화 이력 조회용 (CASH_FLOW_RECOMMEND 등)
+    chatbot_consultation_id: int | None = None
+    # PRODUCT_SEARCH 전용
+    amount: float | None = None
+    period: int | None = None
+    product_type: str | None = None   # DEPOSIT / SAVINGS / SUBSCRIPTION
+    purpose: str | None = None        # lump_sum / monthly / subscription
 
 
 class ChatbotFeatureExecuteResponse(BaseModel):
@@ -137,3 +144,41 @@ class ChatMessageHistoryResponse(BaseModel):
     message: str
     sent_at: datetime | None = None
     read_yn: str = "N"
+
+
+class ChatbotTransferRequest(BaseModel):
+    customer_no: str
+    from_account_id: int
+    to_account_number: str
+    amount: int
+    memo: str = "이체"
+
+
+class ChatbotTransferResponse(BaseModel):
+    status: str          # OK | ERROR
+    message: str
+    transaction_id: int | None = None
+    balance_after: int | None = None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 파일 분석 / 서류 제출
+# ──────────────────────────────────────────────────────────────────────────────
+
+class FileAnalyzeRequest(BaseModel):
+    text: str = Field(..., description="프론트엔드에서 PDF를 파싱한 텍스트")
+    analyze_type: str = Field(..., description="CASH_FLOW | TERMS | PRODUCT")
+    customer_no: str | None = None
+
+
+class FileAnalyzeResponse(BaseModel):
+    analyze_type: str
+    result: str
+
+
+class DocumentUploadResponse(BaseModel):
+    document_id: int
+    filename: str
+    doc_type: str
+    status: str
+    message: str

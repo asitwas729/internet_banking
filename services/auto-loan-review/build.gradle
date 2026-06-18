@@ -1,4 +1,5 @@
 // auto-loan-review: 의존성/플러그인은 루트 build.gradle 의 subprojects 블록에서 일괄 관리.
+
 // 본 모듈은 RDB(JPA) 를 사용하지 않으므로 공통에서 들어오는 spring-data-jpa starter 만 제외.
 configurations.implementation {
     exclude group: 'org.springframework.boot', module: 'spring-boot-starter-data-jpa'
@@ -14,7 +15,11 @@ dependencyManagement {
 dependencies {
     // ── Spring AI (BOM 관리 — 버전 생략) ─────────────────────────────────
     implementation 'org.springframework.ai:spring-ai-openai'                                       // Gemini OpenAI-compat LLM 클라이언트 (A1)
-    implementation 'org.springframework.ai:spring-ai-starter-model-vertex-ai-embedding'             // D1: RAG 임베딩 (Vertex AI text-embedding-005)
+    implementation 'org.springframework.ai:spring-ai-starter-model-vertex-ai-embedding'             // E1: RAG 임베딩 (Vertex AI text-embedding-005)
+
+    // ── E1: Elasticsearch Java 클라이언트 ────────────────────────────────
+    implementation 'co.elastic.clients:elasticsearch-java:8.15.0'
+    testImplementation 'org.testcontainers:elasticsearch'
 
     // ── B1: Audit Log — JDBC + Flyway ────────────────────────────────────
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
@@ -29,4 +34,7 @@ dependencies {
 
     // ── B1 테스트: H2 인메모리 DB (Flyway 마이그레이션 검증) ─────────────
     testRuntimeOnly 'com.h2database:h2'
+
+    // ── 편향 검증 Kafka 컨슈머 ────────────────────────────────────────
+    implementation 'org.springframework.kafka:spring-kafka'
 }

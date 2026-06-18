@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 
@@ -26,7 +26,7 @@ const YEARS = ['2026', '2025', '2024']
 const MONTHS = ['01','02','03','04','05','06','07','08','09','10','11','12']
 const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'))
 
-export default function RateModal({ productName, rates, rateDate, onClose }: Props) {
+export default function RateModal({ productName, rates, onClose }: Props) {
   const [subTab, setSubTab] = useState('전체상품')
   const [rateType, setRateType] = useState('기본이율')
   const [year, setYear] = useState('2026')
@@ -41,7 +41,7 @@ export default function RateModal({ productName, rates, rateDate, onClose }: Pro
         onClick={e => e.stopPropagation()}
       >
         {/* 헤더 */}
-        <div className="flex items-center justify-between px-5 py-3 bg-[#5BC9A8]">
+        <div className="flex items-center justify-between px-5 py-3 bg-kb-mint">
           <span className="text-[16px] font-bold text-white">금리안내</span>
           <span className="text-white">
             <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="white" strokeWidth="2">
@@ -63,7 +63,7 @@ export default function RateModal({ productName, rates, rateDate, onClose }: Pro
             ].map(cat => (
               <button key={cat.label}
                 className={`flex flex-col items-center gap-1 text-[13px] pb-1 ${
-                  cat.active ? 'text-[#5BC9A8] border-b-2 border-[#5BC9A8] font-bold' : 'text-kb-text-muted hover:text-kb-text'
+                  cat.active ? 'text-kb-primary border-b-2 border-kb-primary font-bold' : 'text-kb-text-muted hover:text-kb-text'
                 }`}>
                 <span className="text-lg">{cat.icon}</span>
                 {cat.label}
@@ -78,7 +78,7 @@ export default function RateModal({ productName, rates, rateDate, onClose }: Pro
                 onClick={() => setSubTab(tab)}
                 className={`flex-shrink-0 px-4 py-2.5 text-[12px] border-r border-kb-border transition-colors ${
                   subTab === tab
-                    ? 'border-b-2 border-[#5BC9A8] font-bold text-kb-text bg-white'
+                    ? 'border-b-2 border-kb-primary font-bold text-kb-text bg-white'
                     : 'text-kb-text-muted hover:text-kb-text bg-[#fafafa]'
                 }`}>
                 {tab}
@@ -119,7 +119,7 @@ export default function RateModal({ productName, rates, rateDate, onClose }: Pro
               <button key={rt}
                 onClick={() => setRateType(rt)}
                 className={`text-[13px] flex items-center gap-0.5 ${
-                  rateType === rt ? 'text-[#5BC9A8] font-bold' : 'text-kb-text-muted hover:text-kb-text'
+                  rateType === rt ? 'text-kb-primary font-bold' : 'text-kb-text-muted hover:text-kb-text'
                 }`}>
                 <span className="text-[10px]">▶</span>{rt}
               </button>
@@ -174,7 +174,7 @@ export default function RateModal({ productName, rates, rateDate, onClose }: Pro
         <div className="flex items-center justify-between px-5 py-2 border-t border-kb-border bg-[#fafafa]">
           <span className="text-[12px] text-kb-text-muted flex items-center gap-1">
             <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4"><path d="M10 2L3 7v6c0 4 2.5 7 7 8 4.5-1 7-4 7-8V7L10 2z" fill="#5BC9A8"/></svg>
-            AX풀뱅크
+            AXful Bank
           </span>
           <button onClick={onClose}
             className="border border-kb-border px-6 py-1.5 text-[13px] text-kb-text-body hover:bg-kb-beige-light">

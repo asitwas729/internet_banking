@@ -2,6 +2,7 @@ package com.bank.deposit.service;
 
 import com.bank.deposit.domain.entity.*;
 import com.bank.deposit.domain.enums.*;
+import com.bank.deposit.dto.response.ProductResponse;
 import com.bank.deposit.exception.BusinessException;
 import com.bank.deposit.exception.ErrorCode;
 import com.bank.deposit.repository.*;
@@ -10,7 +11,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -23,6 +28,7 @@ public class ProductService {
     private final SubscriptionProductRepository subscriptionProductRepository;
     private final ProductJoinChannelRepository joinChannelRepository;
     private final ProductTargetGroupRepository targetGroupMappingRepository;
+    private final TargetGroupRepository targetGroupRepository;
     private final ProductInterestRateRepository interestRateRepository;
     private final ProductSpecialTermRepository productSpecialTermRepository;
 
@@ -40,6 +46,34 @@ public class ProductService {
     public Product findById(Long id) {
         return productRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
+    }
+
+    public List<ProductResponse> findAllResponses(ProductType productType, ProductStatus productStatus) {
+        List<Product> products = findAll(productType, productStatus);
+        List<Long> productIds = products.stream().map(Product::getProductId).toList();
+        Map<Long, BigDecimal> bestRateByProductId = calculateBestRates(products);
+        Map<Long, List<ProductResponse.TargetGroupInfo>> targetGroupsByProductId = fetchTargetGroupInfos(productIds);
+        Map<Long, SavingType> savingTypeByProductId = savingsProductRepository
+                .findByProductIdIn(productIds).stream()
+                .collect(Collectors.toMap(SavingsProduct::getProductId, SavingsProduct::getSavingType));
+        return products.stream()
+                .map(product -> ProductResponse.from(
+                        product,
+                        bestRateByProductId.get(product.getProductId()),
+                        savingTypeByProductId.get(product.getProductId()),
+                        targetGroupsByProductId.getOrDefault(product.getProductId(), List.of())))
+                .toList();
+    }
+
+    public ProductResponse findResponseById(Long id) {
+        Product product = findById(id);
+        BigDecimal bestRate = calculateBestRate(product,
+                interestRateRepository.findByProductIdAndIsActive(id, true));
+        List<ProductResponse.TargetGroupInfo> targetGroups = fetchTargetGroupInfos(List.of(id))
+                .getOrDefault(id, List.of());
+        SavingType savingType = savingsProductRepository.findByProductId(id)
+                .map(SavingsProduct::getSavingType).orElse(null);
+        return ProductResponse.from(product, bestRate, savingType, targetGroups);
     }
 
     @Transactional
@@ -212,6 +246,73 @@ public class ProductService {
     // InterestRates
     public List<ProductInterestRate> findInterestRates(Long productId) {
         return interestRateRepository.findByProductId(productId);
+    }
+
+    private Map<Long, List<ProductResponse.TargetGroupInfo>> fetchTargetGroupInfos(Collection<Long> productIds) {
+        if (productIds.isEmpty()) return Map.of();
+        List<ProductTargetGroup> mappings = targetGroupMappingRepository.findByIdProductIdIn(productIds);
+        if (mappings.isEmpty()) return Map.of();
+        Set<Long> tgIds = mappings.stream().map(m -> m.getId().getTargetGroupId()).collect(Collectors.toSet());
+        Map<Long, TargetGroup> tgById = targetGroupRepository.findByTargetGroupIdIn(tgIds).stream()
+                .collect(Collectors.toMap(TargetGroup::getTargetGroupId, tg -> tg));
+        return mappings.stream()
+                .filter(m -> tgById.containsKey(m.getId().getTargetGroupId()))
+                .collect(Collectors.groupingBy(
+                        m -> m.getId().getProductId(),
+                        Collectors.mapping(
+                                m -> ProductResponse.TargetGroupInfo.from(tgById.get(m.getId().getTargetGroupId())),
+                                Collectors.toList())));
+    }
+
+    private Map<Long, BigDecimal> calculateBestRates(List<Product> products) {
+        if (products.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, Product> productById = products.stream()
+                .filter(product -> product.getProductId() != null)
+                .collect(Collectors.toMap(Product::getProductId, product -> product));
+        if (productById.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, List<ProductInterestRate>> ratesByProductId = interestRateRepository
+                .findByProductIdInAndIsActive(productById.keySet().stream().toList(), true)
+                .stream()
+                .collect(Collectors.groupingBy(ProductInterestRate::getProductId));
+
+        return ratesByProductId.entrySet().stream()
+                .map(entry -> new java.util.AbstractMap.SimpleEntry<>(
+                        entry.getKey(),
+                        calculateBestRate(productById.get(entry.getKey()), entry.getValue())))
+                .filter(entry -> entry.getValue() != null)
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    private BigDecimal calculateBestRate(Product product, List<ProductInterestRate> rates) {
+        if (rates == null || rates.isEmpty()) {
+            return null;
+        }
+
+        BigDecimal baseRate = rates.stream()
+                .filter(rate -> rate.getRateType() == RateType.BASE || rate.getRateType() == RateType.PERIOD_BASE)
+                .map(ProductInterestRate::getRate)
+                .max(BigDecimal::compareTo)
+                .orElse(null);
+
+        BigDecimal preferentialRate = rates.stream()
+                .filter(rate -> rate.getRateType() == RateType.PREFERENTIAL)
+                .map(ProductInterestRate::getRate)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        if (baseRate == null) {
+            if (preferentialRate.compareTo(BigDecimal.ZERO) <= 0) {
+                return null;
+            }
+            baseRate = product.getBaseInterestRate() != null ? product.getBaseInterestRate() : BigDecimal.ZERO;
+        }
+
+        return baseRate.add(preferentialRate);
     }
 
     public ProductInterestRate findInterestRate(Long productId, Long rateId) {
