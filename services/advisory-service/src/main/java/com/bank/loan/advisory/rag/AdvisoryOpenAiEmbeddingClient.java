@@ -1,13 +1,17 @@
 package com.bank.loan.advisory.rag;
 
 import com.bank.common.web.BusinessException;
+import com.bank.loan.advisory.observability.AdvisoryMetrics;
 import com.bank.loan.support.LoanErrorCode;
+import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
@@ -36,6 +40,14 @@ public class AdvisoryOpenAiEmbeddingClient implements EmbeddingClient {
     private final int        dimension;
     private final int        maxAttempts;
     private final long       retryBackoffMs;
+
+    @Nullable
+    private AdvisoryMetrics advisoryMetrics;
+
+    @Autowired(required = false)
+    void setAdvisoryMetrics(AdvisoryMetrics advisoryMetrics) {
+        this.advisoryMetrics = advisoryMetrics;
+    }
 
     public AdvisoryOpenAiEmbeddingClient(RestClient.Builder builder,
                                          AdvisoryRagProperties props) {
@@ -74,6 +86,20 @@ public class AdvisoryOpenAiEmbeddingClient implements EmbeddingClient {
 
     @Override
     public float[] embed(String text) {
+        Timer.Sample sample = advisoryMetrics != null ? advisoryMetrics.startRagEmbeddingTimer() : null;
+        boolean success = false;
+        try {
+            float[] result = doEmbed(text);
+            success = true;
+            return result;
+        } finally {
+            if (advisoryMetrics != null && sample != null) {
+                advisoryMetrics.recordRagEmbeddingDuration(sample, MODEL_CD, success ? "success" : "error");
+            }
+        }
+    }
+
+    private float[] doEmbed(String text) {
         EmbedResponse response = callWithRetry(new EmbedRequest(model, List.of(text), dimension));
         if (response.data() == null || response.data().isEmpty()) {
             throw new BusinessException(LoanErrorCode.LOAN_211, "openai 응답 본문 비어 있음");

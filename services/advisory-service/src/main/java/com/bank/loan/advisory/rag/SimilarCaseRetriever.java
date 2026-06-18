@@ -4,8 +4,10 @@ import com.bank.common.web.BusinessException;
 import com.bank.loan.advisory.domain.AdvisoryRetrievalLog;
 import com.bank.loan.advisory.domain.ReviewAdvisoryReport;
 import com.bank.loan.advisory.dto.SimilarCaseResponse;
+import com.bank.loan.advisory.observability.AdvisoryMetrics;
 import com.bank.loan.advisory.repository.AdvisoryRetrievalLogRepository;
 import com.bank.loan.advisory.repository.ReviewAdvisoryReportRepository;
+import io.micrometer.core.instrument.Timer;
 import com.bank.loan.review.domain.LoanReview;
 import com.bank.loan.review.repository.LoanReviewRepository;
 import com.bank.loan.support.LoanErrorCode;
@@ -50,6 +52,7 @@ public class SimilarCaseRetriever {
     private final ReviewAdvisoryReportRepository reportRepo;
     private final LoanReviewRepository           reviewRepo;
     private final AdvisoryRetrievalLogRepository logRepo;
+    private final AdvisoryMetrics                advisoryMetrics;
 
     @Transactional
     public SimilarCaseResponse retrieve(Long advrId, Long actorId) {
@@ -58,38 +61,46 @@ public class SimilarCaseRetriever {
 
     @Transactional
     public SimilarCaseResponse retrieve(Long advrId, int topK, Long actorId) {
-        ReviewAdvisoryReport report = reportRepo.findById(advrId)
-                .filter(r -> r.getDeletedAt() == null)
-                .orElseThrow(() -> new BusinessException(LoanErrorCode.LOAN_190));
+        Timer.Sample sample = advisoryMetrics.startRagSearchTimer();
+        boolean success = false;
+        try {
+            ReviewAdvisoryReport report = reportRepo.findById(advrId)
+                    .filter(r -> r.getDeletedAt() == null)
+                    .orElseThrow(() -> new BusinessException(LoanErrorCode.LOAN_190));
 
-        LoanReview review = reviewRepo.findById(report.getRevId())
-                .filter(r -> r.getDeletedAt() == null)
-                .orElse(null);
+            LoanReview review = reviewRepo.findById(report.getRevId())
+                    .filter(r -> r.getDeletedAt() == null)
+                    .orElse(null);
 
-        String queryText = buildQueryText(report, review);
-        float[] qVec = embeddingClient.embed(queryText);
-        String vecStr = EmbeddingClient.toVectorString(qVec);
+            String queryText = buildQueryText(report, review);
+            float[] qVec = embeddingClient.embed(queryText);
+            String vecStr = EmbeddingClient.toVectorString(qVec);
 
-        List<SimilarCaseResponse.CaseItem> items = jdbc.query(
-                COSINE_SQL,
-                (rs, rn) -> new SimilarCaseResponse.CaseItem(
-                        rs.getLong("case_idx_id"),
-                        rs.getLong("rev_id"),
-                        rs.getString("decision_cd"),
-                        rs.getString("overturn_yn"),
-                        rs.getObject("credit_score", Integer.class),
-                        rs.getObject("dsr_ratio_bps", Integer.class),
-                        rs.getObject("ltv_ratio_bps", Integer.class),
-                        rs.getString("cohort_employment_type_cd"),
-                        rs.getString("cohort_loan_purpose_cd"),
-                        rs.getString("summary_text"),
-                        rs.getDouble("score")),
-                vecStr, report.getRevId(), vecStr, topK);
+            List<SimilarCaseResponse.CaseItem> items = jdbc.query(
+                    COSINE_SQL,
+                    (rs, rn) -> new SimilarCaseResponse.CaseItem(
+                            rs.getLong("case_idx_id"),
+                            rs.getLong("rev_id"),
+                            rs.getString("decision_cd"),
+                            rs.getString("overturn_yn"),
+                            rs.getObject("credit_score", Integer.class),
+                            rs.getObject("dsr_ratio_bps", Integer.class),
+                            rs.getObject("ltv_ratio_bps", Integer.class),
+                            rs.getString("cohort_employment_type_cd"),
+                            rs.getString("cohort_loan_purpose_cd"),
+                            rs.getString("summary_text"),
+                            rs.getDouble("score")),
+                    vecStr, report.getRevId(), vecStr, topK);
 
-        appendLog(advrId, queryText, embeddingClient.defaultModelCd(), items.size(),
-                items.isEmpty() ? null : items.get(0).score(), actorId);
-
-        return new SimilarCaseResponse(advrId, items.size(), items);
+            appendLog(advrId, queryText, embeddingClient.defaultModelCd(), items.size(),
+                    items.isEmpty() ? null : items.get(0).score(), actorId);
+            advisoryMetrics.recordRagSearchResults(items.size(), AdvisoryRetrievalLog.KIND_SIMILAR_CASE);
+            success = true;
+            return new SimilarCaseResponse(advrId, items.size(), items);
+        } finally {
+            advisoryMetrics.recordRagSearchDuration(sample,
+                    AdvisoryRetrievalLog.KIND_SIMILAR_CASE, success ? "success" : "error");
+        }
     }
 
     // ──────────────────────────────────────────────────

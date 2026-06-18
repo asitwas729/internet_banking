@@ -2,7 +2,9 @@ package com.bank.loan.advisory.rag;
 
 import com.bank.loan.advisory.domain.AdvisoryRetrievalLog;
 import com.bank.loan.advisory.dto.PolicyCitationResponse;
+import com.bank.loan.advisory.observability.AdvisoryMetrics;
 import com.bank.loan.advisory.repository.AdvisoryRetrievalLogRepository;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,6 +48,7 @@ public class PolicyCitationRetriever {
     private final JdbcTemplate                   jdbc;
     private final PolicyCitationCache            citationCache;
     private final AdvisoryRetrievalLogRepository logRepo;
+    private final AdvisoryMetrics                advisoryMetrics;
 
     /**
      * 정책 인용 검색.
@@ -60,29 +63,37 @@ public class PolicyCitationRetriever {
     @Transactional
     public PolicyCitationResponse retrieve(Long advrId, String ruleCd,
                                            String queryText, int topK, Long requestedBy) {
-        List<PolicyCitationResponse.CitationItem> items = citationCache.get(ruleCd, queryText, topK)
-                .orElseGet(() -> {
-                    float[] qVec = embeddingClient.embed(queryText);
-                    String vecStr = EmbeddingClient.toVectorString(qVec);
-                    List<PolicyCitationResponse.CitationItem> fresh = new ArrayList<>(jdbc.query(
-                            COSINE_SQL,
-                            (rs, rn) -> new PolicyCitationResponse.CitationItem(
-                                    rs.getLong("chunk_id"),
-                                    rs.getLong("doc_id"),
-                                    rs.getString("doc_cd"),
-                                    rs.getString("doc_title"),
-                                    rs.getString("section_path"),
-                                    rs.getString("chunk_text"),
-                                    rs.getDouble("score")),
-                            vecStr, vecStr, topK));
-                    citationCache.put(ruleCd, queryText, topK, fresh);
-                    return fresh;
-                });
+        Timer.Sample sample = advisoryMetrics.startRagSearchTimer();
+        boolean success = false;
+        try {
+            List<PolicyCitationResponse.CitationItem> items = citationCache.get(ruleCd, queryText, topK)
+                    .orElseGet(() -> {
+                        float[] qVec = embeddingClient.embed(queryText);
+                        String vecStr = EmbeddingClient.toVectorString(qVec);
+                        List<PolicyCitationResponse.CitationItem> fresh = new ArrayList<>(jdbc.query(
+                                COSINE_SQL,
+                                (rs, rn) -> new PolicyCitationResponse.CitationItem(
+                                        rs.getLong("chunk_id"),
+                                        rs.getLong("doc_id"),
+                                        rs.getString("doc_cd"),
+                                        rs.getString("doc_title"),
+                                        rs.getString("section_path"),
+                                        rs.getString("chunk_text"),
+                                        rs.getDouble("score")),
+                                vecStr, vecStr, topK));
+                        citationCache.put(ruleCd, queryText, topK, fresh);
+                        return fresh;
+                    });
 
-        appendLog(advrId, ruleCd, queryText, embeddingClient.defaultModelCd(), items.size(),
-                items.isEmpty() ? null : items.get(0).score(), requestedBy);
-
-        return new PolicyCitationResponse(advrId, items.size(), items);
+            appendLog(advrId, ruleCd, queryText, embeddingClient.defaultModelCd(), items.size(),
+                    items.isEmpty() ? null : items.get(0).score(), requestedBy);
+            advisoryMetrics.recordRagSearchResults(items.size(), AdvisoryRetrievalLog.KIND_POLICY_CITATION);
+            success = true;
+            return new PolicyCitationResponse(advrId, items.size(), items);
+        } finally {
+            advisoryMetrics.recordRagSearchDuration(sample,
+                    AdvisoryRetrievalLog.KIND_POLICY_CITATION, success ? "success" : "error");
+        }
     }
 
     public PolicyCitationResponse retrieve(Long advrId, String ruleCd, String queryText, Long requestedBy) {
