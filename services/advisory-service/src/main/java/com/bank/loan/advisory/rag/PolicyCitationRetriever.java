@@ -5,20 +5,20 @@ import com.bank.loan.advisory.dto.PolicyCitationResponse;
 import com.bank.loan.advisory.repository.AdvisoryRetrievalLogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 정책문서 청크 코사인 유사도 검색 (시나리오 δ — ai-service 어댑터).
+ * 정책문서 청크 코사인 유사도 검색 (Path C — advisory_document_chunk 자체 검색).
  *
- * 기존: advisory_document_chunk JDBC 직접 쿼리
- * 변경: ai-service POST /rag/search (profile=review) 위임
- *
+ * advisory_document_chunk 테이블을 직접 쿼리한다 (ai-service 위임 보류).
  * CRITICAL 룰 발화 시 AdvisoryEvaluator 가 자동 호출 (6-7 훅).
  * 심사관 요청 시 AdvisoryRagController 가 직접 호출.
  * 결과는 ADVISORY_RETRIEVAL_LOG 에 append-only 기록 (감사용).
@@ -28,46 +28,58 @@ import java.util.List;
 @RequiredArgsConstructor
 public class PolicyCitationRetriever {
 
-    private static final int    DEFAULT_TOP_K   = 3;
-    private static final String PROFILE_REVIEW  = "review";
+    private static final int DEFAULT_TOP_K = 3;
 
-    private final AiServiceRagClient             aiServiceRagClient;
+    private static final String COSINE_SQL = """
+            SELECT c.chunk_id, c.doc_id, d.doc_cd, d.doc_title, d.source_uri,
+                   c.section_path, c.chunk_text, c.embedding_model_cd,
+                   1 - (c.embedding <=> CAST(? AS vector)) AS score
+            FROM advisory_document_chunk c
+            JOIN advisory_document d ON d.doc_id = c.doc_id
+            WHERE d.active_yn = 'Y'
+              AND d.deleted_at IS NULL
+            ORDER BY c.embedding <=> CAST(? AS vector)
+            LIMIT ?
+            """;
+
+    private final EmbeddingClient                embeddingClient;
+    private final JdbcTemplate                   jdbc;
     private final PolicyCitationCache            citationCache;
     private final AdvisoryRetrievalLogRepository logRepo;
 
     /**
      * 정책 인용 검색.
      *
-     * @param advrId    검색을 유발한 리포트 ID (감사 로그용; null 허용)
-     * @param ruleCd    트리거 룰 코드 (감사 로그용)
-     * @param queryText 검색 쿼리 텍스트 (룰 신호 내용 요약)
-     * @param topK      반환할 최대 청크 수
+     * @param advrId      검색을 유발한 리포트 ID (감사 로그용; null 허용)
+     * @param ruleCd      트리거 룰 코드 (감사 로그용)
+     * @param queryText   검색 쿼리 텍스트 (룰 신호 내용 요약)
+     * @param topK        반환할 최대 청크 수
      * @param requestedBy 요청자 ID
      * @return 유사도 내림차순 정렬된 인용 목록
      */
     @Transactional
     public PolicyCitationResponse retrieve(Long advrId, String ruleCd,
                                            String queryText, int topK, Long requestedBy) {
-        List<AiServiceRagClient.ChunkHit> hits = citationCache.get(ruleCd, queryText, topK)
+        List<PolicyCitationResponse.CitationItem> items = citationCache.get(ruleCd, queryText, topK)
                 .orElseGet(() -> {
-                    List<AiServiceRagClient.ChunkHit> fetched =
-                            aiServiceRagClient.search(queryText, PROFILE_REVIEW, topK);
-                    citationCache.put(ruleCd, queryText, topK, fetched);
-                    return fetched;
+                    float[] qVec = embeddingClient.embed(queryText);
+                    String vecStr = EmbeddingClient.toVectorString(qVec);
+                    List<PolicyCitationResponse.CitationItem> fresh = new ArrayList<>(jdbc.query(
+                            COSINE_SQL,
+                            (rs, rn) -> new PolicyCitationResponse.CitationItem(
+                                    rs.getLong("chunk_id"),
+                                    rs.getLong("doc_id"),
+                                    rs.getString("doc_cd"),
+                                    rs.getString("doc_title"),
+                                    rs.getString("section_path"),
+                                    rs.getString("chunk_text"),
+                                    rs.getDouble("score")),
+                            vecStr, vecStr, topK));
+                    citationCache.put(ruleCd, queryText, topK, fresh);
+                    return fresh;
                 });
 
-        List<PolicyCitationResponse.CitationItem> items = hits.stream()
-                .map(h -> new PolicyCitationResponse.CitationItem(
-                        h.chunkId(),
-                        h.docId(),
-                        h.title(),   // ai-service 는 docCd 미노출 → title 대체
-                        h.title(),
-                        h.sourceUri(),
-                        h.content(),
-                        h.score()))
-                .toList();
-
-        appendLog(advrId, ruleCd, queryText, "ai-service", items.size(),
+        appendLog(advrId, ruleCd, queryText, embeddingClient.defaultModelCd(), items.size(),
                 items.isEmpty() ? null : items.get(0).score(), requestedBy);
 
         return new PolicyCitationResponse(advrId, items.size(), items);
@@ -78,6 +90,7 @@ public class PolicyCitationRetriever {
     }
 
     // ──────────────────────────────────────────────────
+
     private void appendLog(Long advrId, String ruleCd, String queryText,
                            String modelCd, int resultCount, Double topScore, Long requestedBy) {
         try {
