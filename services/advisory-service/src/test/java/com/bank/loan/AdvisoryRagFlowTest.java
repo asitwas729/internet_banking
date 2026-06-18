@@ -7,6 +7,7 @@ import com.bank.loan.advisory.domain.ReviewAdvisoryRule;
 import com.bank.loan.advisory.engine.rules.DsrThresholdOverrideRule;
 import com.bank.loan.advisory.rag.EmbeddingClient;
 import com.bank.loan.advisory.rag.PiiMaskingUtil;
+import com.bank.loan.advisory.rag.StubEmbeddingClient;
 import com.bank.loan.advisory.repository.AdvisoryDocumentRepository;
 import com.bank.loan.advisory.repository.AdvisoryRetrievalLogRepository;
 import com.bank.loan.advisory.repository.ReviewAdvisoryReportRepository;
@@ -62,6 +63,15 @@ class AdvisoryRagFlowTest extends AbstractLoanIntegrationTest {
 
     private static Long docId;
     private static Long advrId;
+
+    // ============================================================
+    // 00) test 프로파일에서 StubEmbeddingClient 로드 확인
+    // ============================================================
+
+    @Test @Order(0)
+    void test_프로파일에서_Stub_임베딩_클라이언트_로드() {
+        assertThat(embeddingClient).isInstanceOf(StubEmbeddingClient.class);
+    }
 
     // ============================================================
     // 10) 정책문서 등록 + 청크 인입
