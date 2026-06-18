@@ -218,6 +218,34 @@ class AdvisoryRagFlowTest extends AbstractLoanIntegrationTest {
     }
 
     // ============================================================
+    // 35) 백필 신규 케이스 처리 + 재실행 멱등성
+    // ============================================================
+
+    @Test @Order(35)
+    void 백필_신규케이스_처리_및_재실행_멱등성() throws Exception {
+        // Order(30) 케이스는 이미 단건 인덱싱됨 → 백필 시 skipped
+        // 새 COMPLETED 심사 케이스 생성 → 아직 case_index 에 없으므로 backfill 이 처리
+        setupReviewApproved();
+
+        // 1차 백필: 신규 케이스 1건 이상 처리, Order(30) 케이스 건너뜀
+        MvcResult r1 = mockMvc.perform(post("/api/internal/advisory/rag/case-index/backfill"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.processed").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)))
+                .andReturn();
+
+        int processed1 = extractData(r1).get("processed").asInt();
+        int skipped1   = extractData(r1).get("skipped").asInt();
+        assertThat(extractData(r1).get("failed").asInt()).isEqualTo(0);
+
+        // 2차 백필: 모두 이미 인덱싱됨 → processed=0, skipped >= 1차 합계
+        mockMvc.perform(post("/api/internal/advisory/rag/case-index/backfill"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.processed").value(0))
+                .andExpect(jsonPath("$.data.skipped")
+                        .value(org.hamcrest.Matchers.greaterThanOrEqualTo(processed1 + skipped1)));
+    }
+
+    // ============================================================
     // 40) 정책 인용 검색
     // ============================================================
 
