@@ -107,6 +107,43 @@ class AdvisoryRagFlowTest extends AbstractLoanIntegrationTest {
     }
 
     // ============================================================
+    // 11) 동일 doc_cd+version 재등록 → 409 (멱등성)
+    // ============================================================
+
+    @Test @Order(11)
+    void 동일_문서_재등록_시_중복_오류() throws Exception {
+        mockMvc.perform(post("/api/internal/advisory/documents")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "docCd":"DSR_POLICY_2070",
+                                  "docTitle":"재등록 시도",
+                                  "docCategoryCd":"CREDIT_POLICY",
+                                  "docVersion":"v1.0",
+                                  "effectiveStartDate":"20700101",
+                                  "effectiveEndDate":"20701231",
+                                  "content":"중복 등록 테스트"
+                                }
+                                """))
+                .andExpect(status().is4xxClientError());
+    }
+
+    // ============================================================
+    // 12) 적재 통계 endpoint
+    // ============================================================
+
+    @Test @Order(12)
+    void 적재_통계_엔드포인트_문서수와_청크수_반환() throws Exception {
+        mockMvc.perform(get("/api/internal/advisory/documents/stats")
+                        .header("X-Actor-Role", "ADMIN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalDocuments").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.data.activeDocuments").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.data.chunksByModel").isArray())
+                .andExpect(jsonPath("$.data.chunksByModel[0].count").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)));
+    }
+
+    // ============================================================
     // 20) 활성화/비활성화 토글
     // ============================================================
 
