@@ -35,14 +35,14 @@ MSA 구조 기반 인터넷뱅킹 플랫폼. 수신·여신·결제·고객·상
 
 | 구분 | 기술 |
 |---|---|
-| 백엔드 | Java 17, Spring Boot 3.x, Gradle Multi-module |
-| 챗봇 | Python 3.11, FastAPI, SQLAlchemy, Pydantic v2 |
-| 프런트엔드 | Next.js 15, TypeScript, TanStack Query, Tailwind CSS |
+| 백엔드 | Java 17, Spring Boot 3.3.5, Gradle Multi-module |
+| 챗봇/AI 경량 서비스 | Python 3.11, FastAPI, SQLAlchemy, Pydantic v2 |
+| 프런트엔드 | Next.js 15, TypeScript, TanStack Query 5.x, Tailwind CSS, shadcn/ui |
 | DB | PostgreSQL 16 (서비스별 독립 DB), pgvector (AI/RAG) |
 | 캐시 | Redis 7 |
-| 메시지 큐 | Apache Kafka 3.8, Confluent Schema Registry |
-| AI/LLM | Spring AI, OpenAI GPT-4o-mini |
-| 모니터링 | Prometheus, Grafana, Loki, Promtail |
+| 메시지 큐 | Apache Kafka 3.8, Confluent Schema Registry 7.6 |
+| AI/LLM | Spring AI, OpenAI GPT-4o-mini, Vertex AI |
+| 모니터링 | Prometheus, Grafana, Loki, Promtail, Langfuse, Phoenix (OpenTelemetry) |
 | 테스트 | JUnit 5, Mockito, @SpringBootTest / pytest 8 |
 | 패키지 루트 | `com.bank` |
 
@@ -67,8 +67,11 @@ internet_banking/
 │   ├── consultation-service/
 │   │   └── app/
 │   │       ├── main.py                  # FastAPI 앱, 라우터, CORS
-│   │       ├── services.py              # ChatbotService, ChatService
-│   │       ├── features/                # 기능별 Feature 모듈
+│   │       ├── services.py              # ChatbotService, ChatService — 인텐트 분류·기능 라우팅
+│   │       ├── features/
+│   │       │   ├── product_compare.py   # ProductCompareAgent — 상품명 매칭·비교표·GPT 분석
+│   │       │   ├── savings_goal.py      # SavingsGoalAgent — 저축 목표 멀티턴
+│   │       │   └── cash_flow.py         # 현금흐름 기반 추천
 │   │       └── kafka.py
 │   └── (기타 서비스)
 ├── web/
@@ -208,7 +211,7 @@ X-Customer-Id: {customerId}
 
 | 단계 | 프런트 라우트 | 역할 |
 |---|---|---|
-| STEP 1. 이체정보 입력 | `transfer/account/page.tsx` | 출금 계좌 선택, 당행/타행 탭 전환, 입금 계좌·금액 입력 |
+| STEP 1. 이체정보 입력 | `transfer/account/page.tsx` | 출금 계좌 선택(입출금 타입만 표시, 예금·적금·청약 제외), 당행/타행 탭 전환, 입금 계좌·금액 입력 |
 | STEP 2. 이체정보 확인 | `transfer/confirm/page.tsx` | 금융인증서 PIN 확인 후 result로 이동 |
 | STEP 3. 이체결과 | `transfer/result/page.tsx` | `executeDepositTransfer()` → 실제 이체 실행 |
 
@@ -418,6 +421,152 @@ GET /products/deposit/inquiry/terminate?accountId={accountId}
 | 유동성 매칭 | 20점 | 거래 빈도 vs 상품 만기 적합도 |
 | 부가 혜택 | 10점 | 비과세·중도해지·우대금리 여부 합산 |
 
+#### 챗봇 파일 첨부 분석 (4가지 기능)
+
+챗봇 입력창 왼쪽의 📎 버튼을 누르면 파일 첨부 메뉴가 열린다. 4가지 기능을 지원한다.
+
+| 메뉴 항목 | 분석 유형 | 지원 파일 | 동작 |
+|---|---|---|---|
+| 📊 타행 거래내역 분석 | `CASH_FLOW` | PDF | 타행 거래내역 PDF를 업로드하면 월별 수입·지출 패턴, 저축 여력, 금융상품 추천 포인트를 AI가 분석해 답변 |
+| 📋 약관 설명 | `TERMS` | PDF | 약관 PDF를 업로드하면 중도해지 조건·수수료·주의사항 등 핵심 내용을 고객이 이해하기 쉬운 언어로 요약 |
+| 📄 상품 설명서 안내 | `PRODUCT` | PDF | 상품 설명서 PDF를 업로드하면 금리 조건·가입 조건·해지 방법·세제 혜택을 정리해 안내 |
+| 📁 서류 제출 | `ENROLLMENT` | PDF, JPG, PNG | 비과세 확인서 등 서류를 서버에 업로드·저장, DB 기록 후 처리 예정 안내 |
+
+**처리 흐름**
+
+```
+[사용자] 📎 → 파일 선택
+  ↓
+[CASH_FLOW / TERMS / PRODUCT]
+  브라우저에서 pdfjs-dist로 텍스트 추출 (최대 20페이지)
+  ↓
+  POST /chatbot/file/analyze  (consultation-service:8087)
+    text, analyze_type → OpenAI GPT-4o-mini 분석 → result 반환
+  ↓
+  챗봇 메시지로 분석 결과 표시
+
+[ENROLLMENT]
+  파일 원본 multipart 전송
+  ↓
+  POST /chatbot/documents/upload  (consultation-service:8087)
+    파일 저장 (uploads/ 디렉터리) + chatbot_document 테이블 DB 기록
+  ↓
+  "영업일 1~3일 내 처리 예정" 안내 메시지 표시
+```
+
+**환경 변수 (consultation-service)**
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `CONSULTATION_OPENAI_API_KEY` | (필수) | GPT-4o-mini 호출 키. 미설정 시 503 반환 |
+| `CONSULTATION_UPLOADS_DIR` | `./uploads` | 서류 파일 저장 경로 |
+
+> **볼륨 마운트 필수**: 컨테이너 재시작 시 업로드 파일이 삭제되지 않도록 `docker-compose.yml`에 named volume `consultation_uploads:/app/uploads`가 설정되어 있다. 별도 경로를 사용할 경우 `CONSULTATION_UPLOADS_DIR` 환경변수와 volume mount 경로를 함께 변경한다.
+
+**파일 업로드 제한**: 허용 형식 PDF·JPG·PNG, 최대 10MB. MIME 타입 및 확장자 이중 검증 후 초과 시 400 반환.
+
+**DB 테이블**: `chatbot_document` — `document_id`, `customer_no`, `original_filename`, `stored_path`, `doc_type`, `file_size_bytes`, `status`. 서비스 기동 시 SQLAlchemy `create_all`로 자동 생성된다(`services/consultation-service/sql/ddl.sql` 참고).
+
+#### 챗봇 조건 맞춤 상품 추천 — 프런트엔드 5단계 플로우
+
+`상품 추천` 버튼으로 진입하는 **조건 맞춤 추천** 흐름은 프런트엔드(`ChatbotWidget.tsx`)에서 독립적으로 동작한다. 백엔드 CASH_FLOW_RECOMMEND 와 별개로, 고객이 직접 조건을 지정하면 프런트에서 필터링·채점 후 상위 3개를 추천한다.
+
+| 단계 | 입력 |
+|---|---|
+| 1단계 | 가입 기간 (6·12·24·36개월 또는 직접 입력) |
+| 2단계 | 가입 금액 (100·500·1000만원 또는 직접 입력) |
+| 3단계 | 상품 유형 (전체 추천 / 예금 / 적금) |
+| 4단계 | 최소 금리 (1·2·3·4% 이상 또는 직접 입력 / 제한 없음) |
+| 5단계 | 가입 목적 (목돈 굴리기 / 매달 저축하기) |
+
+- **결과 카드**: 각 추천 상품 우측에 **가입** 버튼 표시 → `/products/deposit/join/product-{productId}` 로 바로 이동
+- **예금/적금 분리**: 예금 선택 시 `DEPOSIT` 타입 상품만, 적금 선택 시 `SAVINGS` 타입 상품만 추천
+
+#### 챗봇 우대금리 조회
+
+| 입력 예시 | 동작 |
+|---|---|
+| "우대금리 종류 말해줘" | 판매 중 상품별 우대금리 조건·비율 텍스트 응답 |
+| "우대금리 상품 보여줘" | 우대금리 조건이 있는 상품 목록을 카드 UI로 표시 |
+| "해당하는 상품 리스트 보여줘" | 동일 (우대금리 상품 카드 목록) |
+
+상품 카드에는 우대금리 조건(`pref_condition`)과 추가 금리(`pref_rate`)가 주황색으로 강조 표시된다.
+
+#### 챗봇 상품 비교 분석 에이전트 (PRODUCT_COMPARE)
+
+두 상품을 이름으로 지정하면 8개 항목을 비교하는 테이블 카드와 GPT 기반 맞춤 분석을 제공한다.
+
+**트리거 조건**
+
+- 입력 메시지에 구체적인 상품명(`AXful`, `내맘대로`, `수퍼정기`, `달러자`, `맑은하늘` 등) + 비교 키워드(`비교`, `차이`, `어느 쪽`, `뭐가 더`)가 함께 포함된 경우
+
+**처리 흐름**
+
+```
+ChatbotWidget (웹)
+  ↓ executeChatbotFeature('PRODUCT_COMPARE', { query })  — sendChatbotMessage 우회
+consultation-service
+  └─ ProductCompareAgent.execute()
+       ├─ _find_products_by_name()  : 토큰 채점으로 DB에서 상품 2개 자동 매칭
+       ├─ 8개 항목 비교표 생성
+       │     유형 / 기본금리 / 가입기간 / 세제혜택 / 중도해지 / 자동갱신 / 우대금리조건 / 상품설명
+       └─ GPT-4o-mini 분석 : "내 상황엔 A/B가 유리한 이유" 1~2문장
+  ↓ feature_code="PRODUCT_COMPARE", data=[{row_type:"compare_product", ...}]
+ChatbotWidget
+  └─ 3열 비교 테이블 카드 + 💡 AI 분석 박스 렌더링
+```
+
+**상품명 자동 매칭 (토큰 스코어링)**
+
+- 상품명을 공백·구분자로 토큰 분리 후 4자 이상 토큰이 쿼리에 몇 개 포함되는지로 점수 산정
+- 점수가 같을 경우 짧은 상품명 우선 → "AXful 정기예금", "AXful 내맘대로적금" 정확 구분 가능
+
+**비교 테이블 카드 구성**
+
+| 열 | 내용 |
+|---|---|
+| 항목 | 유형·기본금리·가입기간·세제혜택·중도해지·자동갱신·우대금리조건·상품설명 |
+| 상품 A | 첫 번째 매칭 상품값 |
+| 상품 B | 두 번째 매칭 상품값 |
+
+각 상품 헤더 아래에 **가입하기** 버튼이 표시되어 `/products/deposit/join/{product_id}` 로 바로 이동 가능하다.
+
+**백엔드 응답 구조**
+
+```json
+{
+  "feature_code": "PRODUCT_COMPARE",
+  "status": "OK",
+  "message": "GPT 분석 텍스트",
+  "data": [
+    {
+      "row_type": "compare_product",
+      "product_a": { "product_id": 1, "product_name": "AXful 정기예금", "product_type": "예금", ... },
+      "product_b": { "product_id": 5, "product_name": "AXful 내맘대로적금", "product_type": "적금", ... },
+      "compare_items": [
+        { "label": "유형", "a": "예금", "b": "적금" },
+        { "label": "기본금리", "a": "2.15%", "b": "2.95%" },
+        ...
+      ],
+      "analysis": "GPT 분석 요약"
+    }
+  ]
+}
+```
+
+**관련 파일**
+
+| 파일 | 역할 |
+|---|---|
+| `services/consultation-service/app/features/product_compare.py` | `ProductCompareAgent` — 상품 매칭·비교표 생성·GPT 분석 |
+| `services/consultation-service/app/services.py` | `_execute_product_compare()` — PRODUCT_COMPARE 인텐트 라우팅 |
+| `web/components/chatbot/ChatbotWidget.tsx` | 비교 테이블 카드 렌더링, 후속 질문 처리 |
+| `web/lib/consultation-api.ts` | `ChatbotMessageResponse` 타입에 `feature_code`, `feature_data` 포함 |
+
+**후속 질문 처리**
+
+비교 결과 직후 "나한테 적절한 추천이야?" 등의 질문 시 두 상품을 모두 언급하며 추천 상품과 비추천 상품을 구분해 안내한다. `lastCompareNamesRef` + `lastCompareAnalysisRef`로 직전 비교 컨텍스트를 유지한다.
+
 **예금·적금 적합 판단 (`answerDepositSavingsFit`)**
 
 "예금이랑 적금 중 나한테 맞는 거" 질문 시 deposit-service 추천 에이전트(`fetchDepositRecommendAgent`)를 호출해 판단한다. `GET /api/v1/customers/me`의 `birthDate`로 고객 만 나이를 계산해 백엔드에 전달하며, 연령 기반 상품 필터링은 deposit-service에서 처리된다.
@@ -495,6 +644,8 @@ POST /chatbot/features/{feature_code}/execute
 POST /chatbot/consultations/start
 POST /chatbot/consultations/{id}/messages
 POST /chatbot/transfer
+POST /chatbot/file/analyze
+POST /chatbot/documents/upload
 GET  /chat/queue
 POST /chat/consultations/{id}/connect
 POST /chat/consultations/{id}/messages
@@ -606,7 +757,35 @@ GET  /metrics
 docker compose up -d
 ```
 
-컨테이너: PostgreSQL×6 (5432~5437), pgvector, Kafka (9092), Schema Registry (8081), Redis (6379), Prometheus (9090), Grafana (3000), Gateway (8080)
+**기본 컨테이너 및 포트:**
+
+| 컨테이너 | 포트 | 설명 |
+|---|---|---|
+| customer-db | 5432 | 고객·인증 DB |
+| deposit-db | 5433 | 예적금 DB |
+| loan-db | 5434 | 여신 DB (pgvector) |
+| payment-db | 5435 | 결제 DB (A 은행) |
+| payment-db-b | 5441 | 결제 DB (B 은행) |
+| master-db | 5436 | 마스터 코드 DB |
+| ai-db | 5437 | AI 벡터 DB (pgvector) |
+| langfuse-db | 5439 | LLM 추적 DB |
+| Redis | 6379 | 세션·캐시 |
+| Kafka | 9092 | 이벤트 스트림 |
+| Schema Registry | 18081 | Kafka 스키마 관리 |
+| Prometheus | 9090 | 메트릭 수집 |
+| Grafana | 3000 | 대시보드 |
+| Langfuse | 3001 | LLM 호출 추적 |
+| Phoenix (OTel) | 6006 | OpenTelemetry 트레이싱 |
+
+**선택적 프로필:**
+
+```powershell
+# RAG (Elasticsearch + Kibana + Kafka Connect)
+docker compose --profile rag up -d
+
+# 서류 에이전트 (MinIO + Vault + doc-agent-db)
+docker compose --profile doc up -d
+```
 
 ### 백엔드 서비스 실행
 
@@ -648,6 +827,15 @@ $env:CRYPTO_KEY_BASE64="bG9hbi1zZXJ2aWNlLWRldi1hZXMta2V5LTMyYnl0ZXM="
 
 > 운영 환경에서는 반드시 별도 32바이트 AES-256 키(Base64)를 사용한다.
 
+### 데모 계정
+
+| 역할 | 로그인 ID | 비밀번호 |
+|------|-----------|----------|
+| 고객 (홍길동) | 금융인증서 로그인 | 인증서 PIN |
+| 고객 (테스트) | user01 / user02 / user03 | Employee1234! |
+| 직원 | employee01 | Employee1234! |
+| 관리자 | admin01 | Employee1234! |
+
 ### 프런트엔드 실행
 
 ```powershell
@@ -686,7 +874,8 @@ Flyway로 스키마를 관리하며 서비스 기동 시 자동 적용된다.
 | V12 | 이체 일일 한도 컬럼 추가 |
 | V13 | `deposit_transactions.idempotency_key` 컬럼 + 부분 유니크 인덱스 |
 | V14 | `deposit_target_groups.min_age` / `max_age` 컬럼 추가. 청년고객 19~34세, 국군장병 18~27세로 초기값 설정 |
-| V15 | employee01 테스트 계좌 시드 데이터 추가 |
+| V15 | 홍길동(customer_id=9001) 테스트 계좌·거래 시드 데이터 추가 |
+| V16 | 고아 테이블 정리, 홍길동 계좌 잔액 현실화(현금흐름 추천 시나리오 기준), 거래 날짜 90일 이내 재조정 |
 
 > 서비스 재기동 없이 컬럼이 추가된 경우 Hibernate가 SELECT 시 해당 컬럼을 포함해 500 오류가 발생한다. DB에 직접 DDL을 실행하거나 서비스를 재기동한다.
 

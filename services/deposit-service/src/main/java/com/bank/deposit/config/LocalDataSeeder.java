@@ -37,6 +37,7 @@ public class LocalDataSeeder implements ApplicationRunner {
             seedDemoCustomerAccounts();
             seedDemoCustomerTransactions();
             seedDemoLoginAccounts();
+            refreshHongKildongDemoData();
             return;
         }
 
@@ -532,6 +533,7 @@ public class LocalDataSeeder implements ApplicationRunner {
         seedDemoCustomerAccounts();
         seedDemoCustomerTransactions();
         seedDemoLoginAccounts();
+        refreshHongKildongDemoData();
     }
 
     private void seedDemoCustomerAccounts() {
@@ -573,12 +575,12 @@ public class LocalDataSeeder implements ApplicationRunner {
                     account_status, opened_at, maturity_at, created_at, version
                 ) values
                 ('001-123-000001', '1', 1001, 'DEPOSIT', null,
-                 '001', 5000000, 0, 0, 'KRW', '$2a$10$012345678901234567890u3JcU7Q64k9GZ3f3hQz8hC7cWv9q1y6K',
+                 '001', 100000, 0, 0, 'KRW', '$2a$10$012345678901234567890u3JcU7Q64k9GZ3f3hQz8hC7cWv9q1y6K',
                  true, true, true, true, 'ACTIVE', current_date, current_date + interval '12 months', now(), 0),
                 ('001-123-000002', '1', 1002, 'SAVINGS', 'REGULAR',
-                 '001', 1200000, 1200000, 0, 'KRW', '$2a$10$012345678901234567890u3JcU7Q64k9GZ3f3hQz8hC7cWv9q1y6K',
+                 '001', 100000, 100000, 0, 'KRW', '$2a$10$012345678901234567890u3JcU7Q64k9GZ3f3hQz8hC7cWv9q1y6K',
                  false, true, true, true, 'ACTIVE', current_date, current_date + interval '12 months', now(), 0)
-                on conflict (account_number) do nothing
+                on conflict (account_number) do update set balance = excluded.balance, total_paid_amount = excluded.total_paid_amount
                 """);
     }
 
@@ -704,6 +706,7 @@ public class LocalDataSeeder implements ApplicationRunner {
                 """);
 
         // 3) 기존 활성 계좌 잔액 보충: 본 시드가 만든 계좌(보조 30M 등)는 건드리지 않는다.
+        // 홍길동(9001)은 현금흐름 추천 시나리오용 잔액(V15/V16)을 유지해야 하므로 제외.
         jdbcTemplate.update("""
                 update deposit_accounts
                    set balance = greatest(balance, 50000000),
@@ -712,7 +715,29 @@ public class LocalDataSeeder implements ApplicationRunner {
                  where account_status = 'ACTIVE'
                    and balance < 50000000
                    and created_by is distinct from 'seed-v14'
+                   and customer_id != '9001'
                 """);
+    }
+
+    /**
+     * 홍길동(9001) 챗봇 추천 시나리오용 데모 데이터를 매 부팅마다 현행화한다.
+     * - 잔액: 총 6,200,000원 (현금흐름 채점: 월 잉여 1,640,000 × 12 = 19.68M > 잔액 → 저축 성장형)
+     * - 거래 날짜: 항상 90일 cutoff 이내 유지 (Flyway NOW()는 실행 시각에 동결되므로 여기서 처리)
+     */
+    private void refreshHongKildongDemoData() {
+        // 잔액 보정: V15 ON CONFLICT DO NOTHING 으로 50M이 유지된 경우를 교정
+        jdbcTemplate.update("UPDATE deposit_accounts SET balance = 5000000.00  WHERE account_id = 2001 AND customer_id = '9001'");
+        jdbcTemplate.update("UPDATE deposit_accounts SET balance = 1200000.00  WHERE account_id = 2002 AND customer_id = '9001'");
+        jdbcTemplate.update("UPDATE deposit_accounts SET balance = 0.00        WHERE account_id = 2003 AND customer_id = '9001'");
+        jdbcTemplate.update("UPDATE deposit_accounts SET balance = 0.00        WHERE account_id = 2004 AND customer_id = '9001'");
+
+        // 거래 날짜 재조정: 90일 cutoff 이내에 항상 위치하도록 매 부팅마다 갱신
+        jdbcTemplate.update("UPDATE deposit_transactions SET transaction_at = NOW() - INTERVAL '80 days' WHERE transaction_number = 'TX-9001-M3-IN-01'");
+        jdbcTemplate.update("UPDATE deposit_transactions SET transaction_at = NOW() - INTERVAL '75 days' WHERE transaction_number = 'TX-9001-M3-OUT-01'");
+        jdbcTemplate.update("UPDATE deposit_transactions SET transaction_at = NOW() - INTERVAL '55 days' WHERE transaction_number = 'TX-9001-M2-IN-01'");
+        jdbcTemplate.update("UPDATE deposit_transactions SET transaction_at = NOW() - INTERVAL '45 days' WHERE transaction_number = 'TX-9001-M2-OUT-01'");
+        jdbcTemplate.update("UPDATE deposit_transactions SET transaction_at = NOW() - INTERVAL '25 days' WHERE transaction_number = 'TX-9001-M1-IN-01'");
+        jdbcTemplate.update("UPDATE deposit_transactions SET transaction_at = NOW() - INTERVAL '15 days' WHERE transaction_number = 'TX-9001-M1-OUT-01'");
     }
 
     private BigDecimal bd(String value) {

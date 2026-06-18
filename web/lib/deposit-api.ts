@@ -168,6 +168,10 @@ const CHECKING_PRODUCT_SLUGS = new Set([
   'axful-youth-account',
   'axful-sok',
   'monimo-daily',
+  // join/[id]/page.tsx CHECKING_IDS와 동기화
+  'axful-living',
+  'axful-gs',
+  'election',
 ])
 
 const SAVING_TYPE_BY_SLUG: Record<string, SavingType> = {
@@ -353,7 +357,6 @@ function accountTypeLabel(account: DepositAccount, product?: DepositProduct): Ac
   if (product && CHECKING_PRODUCT_SLUGS.has(getDepositSlugByProductId(product.productId))) return '입출금'
   if (product?.productName?.includes('통장')) return '입출금'
   if (account.accountAlias?.includes('통장')) return '입출금'
-  // contracts/products 조회 실패 시 isWithdrawable로 폴백
   if (account.isWithdrawable ?? account.withdrawable) return '입출금'
   return '예금'
 }

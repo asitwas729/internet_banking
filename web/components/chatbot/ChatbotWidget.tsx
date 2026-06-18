@@ -10,10 +10,12 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '@/lib/api'
-import { ArrowLeftRight, Bot, Home, LogOut, MessageCircle, PackageSearch, Phone, Send, Sparkles, X } from 'lucide-react'
+import { ArrowLeftRight, Bot, Home, LogOut, MessageCircle, PackageSearch, Paperclip, Phone, Send, Sparkles, X } from 'lucide-react'
 import {
   ChatbotButton,
   ChatbotFeatureExecuteResponse,
+  analyzeFile,
+  uploadDocument,
   executeChatbotFeature,
   executeChatbotTransfer,
   sendChatbotMessage,
@@ -26,6 +28,7 @@ import {
   fetchDepositInterestRates,
   fetchDepositRecommendAgent,
   terminateDepositContract,
+  getDepositSlugByProductId,
   type DepositProduct,
   type DepositProductType,
   type DepositRecommendProduct,
@@ -68,13 +71,14 @@ type TransferState = {
   cardBack: string
 }
 
-type ProductSearchStep = 'period' | 'amount' | 'type' | 'purpose' | 'done'
+type ProductSearchStep = 'period' | 'amount' | 'type' | 'rate' | 'purpose' | 'done'
 type ProductSearchState = {
   step: ProductSearchStep
   period: string
   amount: string
   productType: 'DEPOSIT' | 'SAVINGS' | 'SUBSCRIPTION' | null
   purpose: 'lump_sum' | 'monthly' | null
+  minRate: string
 }
 
 type TerminateStep = 'method' | 'verify-card' | 'verify-cert-info' | 'verify-cert-pin' | 'done' | 'error'
@@ -326,6 +330,11 @@ export default function ChatbotWidget() {
   const [lastRecommendCtx, setLastRecommendCtx] = useState<string>('')
   const lastRecommendProductsRef = useRef<Record<string, unknown>[]>([])
   const lastTopProductRef = useRef<Record<string, unknown> | null>(null)
+  const lastCompareAnalysisRef = useRef<string | null>(null)
+  const lastCompareNamesRef = useRef<[string, string] | null>(null)
+  const [showFileMenu, setShowFileMenu] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [pendingFileAction, setPendingFileAction] = useState<'CASH_FLOW' | 'TERMS' | 'PRODUCT' | 'ENROLLMENT' | null>(null)
   const pendingLoginActionRef = useRef<string | null>(null)
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -496,6 +505,14 @@ export default function ChatbotWidget() {
     return enriched
   }
 
+  function parseKoreanAmount(value: string): number {
+    const v = value.replace(/,/g, '').trim()
+    const manMatch = v.match(/(\d+(?:\.\d+)?)\s*만/)
+    if (manMatch) return Math.round(parseFloat(manMatch[1]) * 10_000)
+    const num = parseFloat(v.replace(/[^0-9.]/g, ''))
+    return isNaN(num) ? 0 : num
+  }
+
   function inferProductType(text: string): DepositProductType | undefined {
     if (text.includes('청약')) return 'SUBSCRIPTION'
     if (text.includes('적금')) return 'SAVINGS'
@@ -613,7 +630,291 @@ export default function ChatbotWidget() {
     ].join('\n')
   }
 
+  async function executeDepositProductSearch(params: {
+    customerId: string
+    period?: number
+    amount?: number
+    productType?: DepositProductType
+    purpose?: 'lump_sum' | 'monthly' | null
+    minRate?: number
+  }) {
+    // ── 1. 고객 재정 데이터 수집 ──
+    let totalBalance = 0
+    let monthlyIncome = 0
+    let monthlyExpense = 0
+    let txFrequency = 0
+
+    try {
+      const accounts = await fetchDepositAccountViewModels(params.customerId)
+      totalBalance = accounts.reduce((s, a) => s + a.balance, 0)
+    } catch {}
+    try {
+      const txs = await fetchTransactions({ customerId: params.customerId })
+      const now = new Date()
+      const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate())
+      const recent = txs.filter(t => new Date(t.transactionAt ?? '') >= threeMonthsAgo)
+      monthlyIncome  = recent.filter(t => t.directionType === 'IN').reduce((s, t) => s + Number(t.amount), 0) / 3
+      monthlyExpense = recent.filter(t => t.directionType === 'OUT').reduce((s, t) => s + Number(t.amount), 0) / 3
+      txFrequency    = recent.length / 3
+    } catch {}
+
+    const monthlySurplus = Math.max(0, monthlyIncome - monthlyExpense)
+    const isLowFrequency = txFrequency < 10
+    const investAmount = params.amount ?? ((params.purpose === 'monthly' ? monthlySurplus : totalBalance * 0.7) || 1_000_000)
+    const investPeriod = params.period ?? 12
+
+    // ── 2. 고객 만 나이 계산 ──
+    let customerAge: number | null = null
+    try {
+      const meRes = await api.get<{ data: { birthDate?: string } }>('/api/v1/customers/me')
+      const birthDate = meRes.data?.data?.birthDate // 'YYYY-MM-DD' 또는 'YYYYMMDD'
+      if (birthDate) {
+        const normalized = birthDate.replace(/-/g, '')
+        const byear = parseInt(normalized.slice(0, 4), 10)
+        const bmonth = parseInt(normalized.slice(4, 6), 10)
+        const bday = parseInt(normalized.slice(6, 8), 10)
+        const now = new Date()
+        customerAge = now.getFullYear() - byear -
+          (now.getMonth() + 1 < bmonth || (now.getMonth() + 1 === bmonth && now.getDate() < bday) ? 1 : 0)
+      }
+    } catch { /* 나이 조회 실패 시 키워드 fallback으로만 처리 */ }
+
+    // ── 3. 상품 후보 필터링 ──
+    const EXCLUDE = ['군인', '장병', '군무원', '사병', '병사']
+    const YOUTH_KEYWORDS = ['청년도약', '청년우대', '청년 우대', '청년주택', '청년 주택']
+    const allProducts = await fetchDepositProducts(params.productType ? { productType: params.productType } : undefined)
+    const baseFilter = (p: (typeof allProducts)[0]) => {
+      if (p.productStatus && p.productStatus !== 'SELLING') return false
+      if (p.productType === 'SUBSCRIPTION' && params.productType !== 'SUBSCRIPTION') return false
+      const nd = `${p.productName} ${p.description ?? ''}`
+      if (EXCLUDE.some(k => nd.includes(k))) return false
+
+      // 1순위: DB targetGroups의 minAge/maxAge로 나이 체크
+      const hasAgeRestriction = p.targetGroups?.some(tg => tg.minAge != null || tg.maxAge != null) ?? false
+      if (customerAge !== null && hasAgeRestriction) {
+        const eligible = p.targetGroups!.some(tg => {
+          if (tg.minAge == null && tg.maxAge == null) return true
+          const okMin = tg.minAge == null || customerAge! >= tg.minAge
+          const okMax = tg.maxAge == null || customerAge! <= tg.maxAge
+          return okMin && okMax
+        })
+        if (!eligible) return false
+      }
+      // 2순위: 키워드 fallback
+      if (YOUTH_KEYWORDS.some(k => nd.includes(k))) {
+        if (customerAge === null) return false
+        if (!hasAgeRestriction && customerAge > 34) return false
+      }
+
+      const minAmt = Number(p.minJoinAmount ?? 0)
+      if (minAmt > 0) {
+        if (p.productType === 'DEPOSIT' && totalBalance   > 0 && minAmt > totalBalance)       return false
+        if (p.productType === 'SAVINGS' && monthlySurplus > 0 && minAmt > monthlySurplus * 2) return false
+      }
+      return true
+    }
+    const baseProducts = allProducts.filter(baseFilter)
+    let rateFilterRelaxed = false
+    let candidates = params.minRate != null && params.minRate > 0
+      ? baseProducts.filter(p => Number(p.bestRate ?? p.baseInterestRate ?? 0) >= params.minRate!)
+      : baseProducts
+    // 금리 조건이 너무 엄격해 결과가 없으면 금리 필터 없이 재시도
+    if (candidates.length === 0 && params.minRate != null && params.minRate > 0) {
+      candidates = baseProducts
+      rateFilterRelaxed = true
+    }
+
+    const maxInterest = Math.max(1, ...candidates.map(p => {
+      const r = Number(p.bestRate ?? p.baseInterestRate ?? 0) / 100
+      return p.productType === 'SAVINGS'
+        ? investAmount * r * (investPeriod / 12) * 0.5
+        : investAmount * r * (investPeriod / 12)
+    }))
+
+    // ── 3. 채점 함수 (isAccumulateType 파라미터로 두 프로파일 모두 계산) ──
+    function scoreProducts(isAccumulateType: boolean) {
+      const profileLabel = isAccumulateType ? '저축성장형' : '목돈운용형'
+      const savingsCandidates = candidates.filter(p => p.productType === 'SAVINGS')
+      console.log(`[추천][${profileLabel}] 전체 후보=${candidates.length}개 / SAVINGS후보=${savingsCandidates.length}개`)
+      console.log(`[추천][${profileLabel}] 입력값: totalBalance=${totalBalance} monthlySurplus=${monthlySurplus} investAmount=${investAmount} investPeriod=${investPeriod} maxInterest=${maxInterest.toFixed(0)}`)
+
+      return candidates.map(p => {
+        const minAmt    = Number(p.minJoinAmount ?? 0)
+        const minPeriod = p.minPeriodMonth ?? 1
+        const maxPeriod = p.maxPeriodMonth ?? 60
+        const rate      = Number(p.bestRate ?? p.baseInterestRate ?? 0)
+
+        /* 재정 적합도 (40점) */
+        let financialScore = 20
+        let financialDetail = 'default'
+        if (p.productType === 'DEPOSIT' && totalBalance > 0 && minAmt > 0) {
+          const ratio = totalBalance / minAmt
+          financialScore = ratio >= 3 ? 40 : ratio >= 1.5 ? 30 : ratio >= 1 ? 20 : 10
+          financialDetail = `DEPOSIT ratio=${ratio.toFixed(2)}`
+        } else if (p.productType === 'SAVINGS') {
+          if (monthlySurplus > 0 && minAmt > 0) {
+            const ratio = monthlySurplus / (minAmt * 2)
+            let base = ratio >= 2 ? 40 : ratio >= 1 ? 30 : ratio >= 0.5 ? 20 : 10
+            const beforeBoost = base
+            if (isAccumulateType) base = Math.min(40, Math.round(base * 1.3))
+            financialScore = base
+            financialDetail = `SAVINGS ratio=${ratio.toFixed(2)} base=${beforeBoost}${isAccumulateType ? `→×1.3→${base}` : ''}`
+          } else {
+            financialScore = isAccumulateType ? 30 : 20
+            financialDetail = `SAVINGS monthlySurplus=0 fallback isAccumulate=${isAccumulateType}`
+          }
+        }
+
+        /* 예상 수익 (30점) */
+        const rateD = rate / 100
+        const interest = p.productType === 'SAVINGS'
+          ? investAmount * rateD * (investPeriod / 12) * 0.5
+          : investAmount * rateD * (investPeriod / 12)
+        const returnScore = Math.round((interest / maxInterest) * 30)
+
+        /* 유동성 매칭 (20점) */
+        const avgPeriod = (minPeriod + Math.min(maxPeriod, 36)) / 2
+        let liquidityScore = isLowFrequency
+          ? (avgPeriod >= 24 ? 20 : avgPeriod >= 12 ? 15 : avgPeriod >= 6 ? 10 : 5)
+          : (avgPeriod <= 6  ? 20 : avgPeriod <= 12 ? 15 : avgPeriod <= 24 ? 10 : 5)
+        if (params.period) {
+          const ok = params.period >= minPeriod && (!p.maxPeriodMonth || params.period <= maxPeriod)
+          if (!ok) liquidityScore = Math.max(0, liquidityScore - 8)
+        }
+
+        /* 부가 혜택 (10점) */
+        const desc = `${p.productName} ${p.description ?? ''}`.toLowerCase()
+        let benefitScore = 0
+        if (desc.includes('비과세') || desc.includes('세금우대'))        benefitScore += 5
+        if (desc.includes('중도해지') || desc.includes('수시입출'))       benefitScore += 3
+        if (desc.includes('우대금리') || desc.includes('preferential'))  benefitScore += 2
+        benefitScore = Math.min(10, benefitScore)
+
+        const totalScore = financialScore + returnScore + liquidityScore + benefitScore
+
+        /* 디버그: 적금 상품 또는 관심 상품 상세 출력 */
+        const isWatched = p.productName.includes('맑은하늘') || p.productName.includes('내맘대로')
+        if (p.productType === 'SAVINGS' || isWatched) {
+          console.log(
+            `[추천][${profileLabel}] ${p.productName} (${p.productType})` +
+            ` | rate=${rate}%(bestRate=${p.bestRate ?? 'N/A'} base=${p.baseInterestRate})` +
+            ` | 재정=${financialScore}(${financialDetail}) 수익=${returnScore}(interest=${interest.toFixed(0)}) 유동성=${liquidityScore} 혜택=${benefitScore}` +
+            ` | 합계=${totalScore}`
+          )
+        }
+
+        return {
+          product: p,
+          score: totalScore,
+          financialScore, returnScore, liquidityScore, benefitScore,
+        }
+      }).sort((a, b) => b.score - a.score)
+    }
+
+    // ── 4. 고객 유형 진단 후 해당 프로파일 top3만 계산 ──
+    const isAccumulateType = monthlySurplus > 0 && (monthlySurplus * 12) > totalBalance
+    const sorted = scoreProducts(isAccumulateType)
+    const profileLabel2 = isAccumulateType ? '저축 성장형' : '목돈 운용형'
+    console.log(`[추천][${profileLabel2}] Top5:`, sorted.slice(0, 5).map(s => `${s.product.productName}(${s.score}점)`).join(' / '))
+    const top3 = sorted.slice(0, 3)
+
+    const toRows = async (items: ReturnType<typeof scoreProducts>) => {
+      const rows = items.map((s, i) => productToRow(
+        s.product, i,
+        `재정 ${s.financialScore}/40 · 수익 ${s.returnScore}/30 · 유동성 ${s.liquidityScore}/20 · 혜택 ${s.benefitScore}/10 = ${s.score}점`,
+      ))
+      return enrichWithPreferentialRates(rows)
+    }
+
+    const resultRows = await toRows(top3)
+
+    const rateNote = rateFilterRelaxed ? `\n⚠️ 금리 ${params.minRate}% 이상 조건에 맞는 상품이 없어 전체 상품 중 추천합니다.` : ''
+    const diagnosisMsg = isAccumulateType
+      ? `📌 고객님 진단: 저축 성장형\n연 저축 가능액 ${Math.round(monthlySurplus * 12 / 10000)}만원 > 현재 잔액 ${Math.round(totalBalance / 10000)}만원으로, 목돈을 만드는 적금이 더 유리합니다.${rateNote}`
+      : `📌 고객님 진단: 목돈 운용형\n현재 잔액 ${Math.round(totalBalance / 10000)}만원으로 목돈을 안정적으로 굴리는 예금이 더 유리합니다.${rateNote}`
+
+    return {
+      ...buildFeatureResult('PRODUCT_SEARCH_COMPARE', diagnosisMsg, []),
+      compareData: { accumulate: isAccumulateType ? resultRows : [], lumpSum: isAccumulateType ? [] : resultRows, isAccumulateType },
+    }
+  }
+
+  function moneyText(value?: number) {
+    return value == null ? null : `${Number(value).toLocaleString()}원`
+  }
+
+  async function answerCashflowRecommend(customerId: string, userText: string): Promise<string> {
+    try {
+      let birthYear: number | undefined
+      try {
+        const meRes = await api.get<{ data: { birthDate?: string } }>('/api/v1/customers/me')
+        const birthDate = meRes.data?.data?.birthDate
+        if (birthDate) {
+          birthYear = parseInt(birthDate.replace(/-/g, '').slice(0, 4), 10)
+        }
+      } catch { /* 나이 미확인 시 필터 생략 */ }
+      const result = await fetchDepositRecommendAgent(customerId, 3, birthYear)
+      const products = result.recommendations ?? result.products ?? []
+      const rows = products.slice(0, 3).map((product, index) =>
+        productToRow(product, index, product.reason ?? '최근 현금흐름 기반 추천 상품입니다.'),
+      )
+      const enrichedRows = await enrichWithPreferentialRates(rows)
+      saveRecommendContext(buildFeatureResult('CASH_FLOW_RECOMMEND', '최근 현금흐름 기반 추천 상품입니다.', enrichedRows))
+      const firstDepositOrSavings = products.find((product) => {
+        const type = product.productType ?? product.product_type
+        return type === 'DEPOSIT' || type === 'SAVINGS'
+      })
+      const productType = firstDepositOrSavings?.productType ?? firstDepositOrSavings?.product_type
+      const productName = firstDepositOrSavings?.productName ?? firstDepositOrSavings?.product_name
+      const reason = firstDepositOrSavings?.reason
+      const netCashFlow = result.cashFlow?.netCashFlow
+      const estimatedSavings = result.cashFlow?.estimatedSavingsAmount
+
+      if (productType === 'DEPOSIT') {
+        return [
+          '고객님의 최근 현금흐름 기준으로는 적금보다 예금이 더 적절해 보여요.',
+          '',
+          netCashFlow != null ? `최근 순현금흐름은 약 ${Number(netCashFlow).toLocaleString()}원입니다.` : null,
+          '이미 운용할 수 있는 목돈이 있거나, 매달 추가 납입보다 일정 기간 묶어두는 방식이 더 맞을 때 예금이 유리합니다.',
+          productName ? `우선 검토할 상품: ${productName}` : null,
+          reason ? `판단 근거: ${reason}` : null,
+        ].filter(Boolean).join('\n')
+      }
+
+      if (productType === 'SAVINGS') {
+        return [
+          '고객님의 최근 현금흐름 기준으로는 예금보다 적금이 더 적절해 보여요.',
+          '',
+          estimatedSavings != null ? `매달 저축 여력은 약 ${Number(estimatedSavings).toLocaleString()}원으로 추정됩니다.` : null,
+          '목돈을 한 번에 맡기기보다 매달 꾸준히 모으는 패턴이면 적금이 더 잘 맞습니다.',
+          productName ? `우선 검토할 상품: ${productName}` : null,
+          reason ? `판단 근거: ${reason}` : null,
+        ].filter(Boolean).join('\n')
+      }
+    } catch {}
+
+    return [
+      '거래 내역을 충분히 확인하지 못해 일반 기준으로 안내드릴게요.',
+      '',
+      '- 이미 모아둔 목돈이 있으면 예금이 더 적절합니다.',
+      '- 매달 조금씩 모으고 싶으면 적금이 더 적절합니다.',
+      '- 당장 큰 금액을 묶기 어렵다면 소액 자유적금부터 시작하는 편이 좋습니다.',
+    ].join('\n')
+  }
+
+  function josa(word: string, type: '을를' | '이가' | '과와'): string {
+    const code = word.charCodeAt(word.length - 1)
+    const hasBatchim = code >= 0xAC00 && (code - 0xAC00) % 28 !== 0
+    if (type === '을를') return word + (hasBatchim ? '을' : '를')
+    if (type === '이가') return word + (hasBatchim ? '이' : '가')
+    return word + (hasBatchim ? '과' : '와')
+  }
+
   function answerProductCompare(text: string): string | null {
+    // 구체적 상품명이 포함된 비교 요청은 서버(ProductCompareAgent)로 위임
+    const hasSpecificProduct = /AXful|내맘대로|수퍼정기|달러자|맑은하늘|장병내일|청년도약|특★한|쏙머니|당선통장|생계비|GS Pay|모임금고|스타통장|지갑통장|자유입출금|주택청약|청년 주택드림/.test(text)
+    if (hasSpecificProduct) return null
+
     const normalized = text.replace(/\s+/g, '').toLowerCase()
     const hasCompareIntent = ['비교', '차이', '뭐가더', '어느쪽', 'compare', 'difference'].some(keyword => normalized.includes(keyword))
     const hasMeaningIntent = ['뜻', '의미', '뭐야', '뭔가요', '뭔지', '설명', '알려줘', '개념'].some(keyword => normalized.includes(keyword))
@@ -661,7 +962,9 @@ export default function ChatbotWidget() {
       return lines.join('\n')
     }
 
-    if (wantsDeposit && wantsSavings && hasCompareIntent && !wantsPersonal) {
+    // 구체적인 상품명이 포함된 경우(ex: "AXful 정기예금이랑 내맘대로적금 비교")는 서버로 위임
+    const hasSpecificProductName = /AXful|내맘대로|수퍼정기|달러자|맑은하늘|장병내일|청년도약|특★한|쏙머니|당선통장|생계비|GS Pay|모임금고|스타통장|지갑통장|자유입출금|주택청약|청년 주택드림/.test(text)
+    if (wantsDeposit && wantsSavings && hasCompareIntent && !wantsPersonal && !hasSpecificProductName) {
       return [
         '예금과 적금의 차이를 안내해 드릴게요.',
         '',
@@ -875,7 +1178,7 @@ export default function ChatbotWidget() {
       setMessages([{ id: messageId('user'), role: 'user', text }])
       try {
         const cid = customerNo.trim() || getCurrentDepositCustomerId()
-        const answer = await answerDepositSavingsFit(cid)
+        const answer = await answerCashflowRecommend(cid, trimmed)
         setMessages((current) => [...current, { id: messageId('bot'), role: 'bot', text: answer }])
       } catch {
         setMessages((current) => [...current, {
@@ -889,7 +1192,46 @@ export default function ChatbotWidget() {
       return
     }
 
-    const compareAnswer = answerProductCompare(trimmed)
+    // 구체적 상품명 포함 비교 요청 → executeChatbotFeature 직접 호출
+    const hasSpecificProductInCompare = /AXful|내맘대로|수퍼정기|달러자|맑은하늘|장병내일|청년도약|특★한|쏙머니|당선통장|생계비|GS Pay|모임금고|스타통장|지갑통장|자유입출금|주택청약|청년 주택드림/.test(trimmed)
+    const hasCompareWord = ['비교', '차이', '어느 쪽', '어느쪽', '뭐가 더'].some(w => trimmed.includes(w))
+    if (hasSpecificProductInCompare && hasCompareWord) {
+      setLoading(true)
+      setExpandedRow(null)
+      setDataPages({})
+      setMessages([{ id: messageId('user'), role: 'user', text }])
+      try {
+        const consultationId = await ensureStarted()
+        const result = await executeChatbotFeature('PRODUCT_COMPARE', {
+          customer_no: customerNo.trim() || getCurrentDepositCustomerId(),
+          query: trimmed,
+          chatbot_consultation_id: consultationId ?? undefined,
+        })
+        // 분석 텍스트 저장 (후속 질문 응답용), 첫 응답은 짧게 표시
+        let shortIntro = '두 상품을 비교했습니다. 아래 표와 AI 분석을 확인해주세요.'
+        if (result.data && result.data.length > 0) {
+          const row = result.data.find(r => r.row_type === 'compare_product')
+          if (row) {
+            lastCompareAnalysisRef.current = String(row.analysis ?? '')
+            const pa = (row.product_a as Record<string, unknown>)
+            const pb = (row.product_b as Record<string, unknown>)
+            const nameA = String(pa.product_name ?? '')
+            const nameB = String(pb.product_name ?? '')
+            lastCompareNamesRef.current = [nameA, nameB]
+            shortIntro = `${josa(nameA, '과와')} ${josa(nameB, '을를')} 비교했습니다.`
+          }
+        }
+        setMessages(prev => [...prev, addFeatureResult({ ...result, message: shortIntro })])
+      } catch {
+        setMessages(prev => [...prev, { id: messageId('error'), role: 'system', text: '요청 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }])
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    const isMatureQuery = ['만기', '재투자', '재예치', '재가입'].some(w => trimmed.includes(w))
+    const compareAnswer = isMatureQuery ? null : answerProductCompare(trimmed)
     if (compareAnswer) {
       setExpandedRow(null)
       setDataPages({})
@@ -897,6 +1239,26 @@ export default function ChatbotWidget() {
         { id: messageId('user'), role: 'user', text },
         { id: messageId('bot'), role: 'bot', text: compareAnswer },
       ])
+      return
+    }
+
+    // 비교 후속 질문 처리 ("나한테 적절한 추천이야?" 등)
+    const isCompareFollowup = lastCompareAnalysisRef.current &&
+      ['나한테', '나에게', '나한', '적절', '적합', '맞아', '맞나', '맞는', '추천이야', '추천인가', '맞게'].some(w => trimmed.includes(w))
+    if (isCompareFollowup) {
+      const fullAnalysis = lastCompareAnalysisRef.current!
+      const names = lastCompareNamesRef.current
+      const productMatch = fullAnalysis.match(/내\s*상황엔\s*([^\s이가]+(?:\s+[^\s이가]+)*?)\s*[이가]\s*유리/)
+      const recommended = productMatch ? productMatch[1].trim() : null
+      const other = names ? names.find(n => n !== recommended) ?? null : null
+      const replyText = recommended && other
+        ? `${josa(recommended, '과와')} ${josa(other, '을를')} 비교해봤을 때,\n금리·조건 면에서 ${josa(recommended, '이가')} 고객님께 조금 더 유리할 수 있어요 😊\n단, ${other}도 중도해지나 자동갱신 조건에 따라 맞는 경우가 있으니 위 표를 함께 참고해 주세요!`
+        : '위 두 상품 모두 좋은 선택이에요! 비교표와 AI 분석을 참고하셔서 고객님 상황에 맞게 선택해 보세요 😊'
+      setMessages(prev => [...prev, {
+        id: messageId('bot'),
+        role: 'bot',
+        text: replyText,
+      }])
       return
     }
 
@@ -908,6 +1270,70 @@ export default function ChatbotWidget() {
         { id: messageId('user'), role: 'user', text },
         { id: messageId('bot'), role: 'bot', text: followupAnswer },
       ])
+      return
+    }
+
+    // X%이상 상품 보여줘 패턴 처리 (예: "3%이상 상품", "금리 2% 이상 상품들")
+    const rateFilterMatch = trimmed.match(/([0-9]+(?:\.[0-9]+)?)\s*%\s*이상/)
+    if (rateFilterMatch && ['상품', '보여줘', '보여주', '보여달', '추천', '알려'].some(w => trimmed.includes(w))) {
+      const minRate = Number(rateFilterMatch[1])
+      setLoading(true)
+      setExpandedRow(null)
+      setDataPages({})
+      pushMessages([{ id: messageId('user'), role: 'user', text }])
+      try {
+        const allProducts = await fetchDepositProducts()
+        const filtered = allProducts.filter(p => {
+          if (p.productStatus && p.productStatus !== 'SELLING') return false
+          if (p.productType === 'SUBSCRIPTION') return false
+          const rate = Number(p.bestRate ?? p.baseInterestRate ?? 0)
+          return rate >= minRate
+        }).sort((a, b) => Number(b.bestRate ?? b.baseInterestRate ?? 0) - Number(a.bestRate ?? a.baseInterestRate ?? 0))
+        const rows = await enrichWithPreferentialRates(filtered.map((p, i) => productToRow(p, i)))
+        const result = buildFeatureResult('PRODUCT_GUIDE', `금리 ${minRate}% 이상 상품 ${rows.length}개입니다.`, rows)
+        pushMessages([addFeatureResult(result as unknown as Parameters<typeof addFeatureResult>[0])])
+      } catch {
+        pushMessages([{ id: messageId('error'), role: 'system', text: '상품 정보를 불러오는 중 오류가 발생했습니다.' }])
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    // 우대금리 종류 / 우대금리 상품 질문
+    const hasPrefKeyword = ['우대금리', '우대 금리'].some(w => trimmed.includes(w))
+    const isHaedangSangpum = ['해당하는 상품', '해당 상품'].some(w => trimmed.includes(w))
+    if (hasPrefKeyword || isHaedangSangpum) {
+      const wantProductList = hasPrefKeyword
+        ? ['상품', '리스트', '보여줘', '보여주', '해당'].some(w => trimmed.includes(w))
+        : true
+      setLoading(true)
+      setExpandedRow(null)
+      setDataPages({})
+      pushMessages([{ id: messageId('user'), role: 'user', text }])
+      try {
+        const allProducts = await fetchDepositProducts()
+        const selling = allProducts.filter(p => (!p.productStatus || p.productStatus === 'SELLING') && p.productType !== 'SUBSCRIPTION')
+        const rows = selling.map((p, i) => productToRow(p, i))
+        const enriched = await enrichWithPreferentialRates(rows)
+        const withPref = enriched.filter(r => r.pref_condition != null && String(r.pref_condition).trim() !== '')
+
+        if (wantProductList) {
+          const result = buildFeatureResult('PRODUCT_GUIDE', `우대금리 조건이 있는 상품 ${withPref.length}개입니다.`, withPref)
+          pushMessages([addFeatureResult(result as unknown as Parameters<typeof addFeatureResult>[0])])
+        } else {
+          const conditionSet = new Set<string>()
+          withPref.forEach(r => String(r.pref_condition ?? '').split(' / ').forEach(c => { if (c.trim()) conditionSet.add(c.trim()) }))
+          const condList = Array.from(conditionSet).slice(0, 10)
+          const productLines = withPref.slice(0, 8).map(r => `• ${String(r.product_name ?? '')}: ${String(r.pref_condition ?? '')}${r.pref_rate ? ` (+${r.pref_rate}%)` : ''}`)
+          const reply = `우대금리 조건 종류 (${conditionSet.size}가지):\n${condList.map(c => `• ${c}`).join('\n')}${conditionSet.size > 10 ? '\n...' : ''}\n\n상품별 우대금리:\n${productLines.join('\n')}${withPref.length > 8 ? `\n...외 ${withPref.length - 8}개` : ''}\n\n"우대금리 상품 보여줘"라고 하시면 상품 목록을 보여드립니다.`
+          pushMessages([{ id: messageId('bot'), role: 'bot', text: reply }])
+        }
+      } catch {
+        pushMessages([{ id: messageId('error'), role: 'system', text: '우대금리 정보를 불러오는 중 오류가 발생했습니다.' }])
+      } finally {
+        setLoading(false)
+      }
       return
     }
 
@@ -970,7 +1396,14 @@ export default function ChatbotWidget() {
         message: messageWithCtx,
         button_value: buttonValue ?? null,
       })
-      setMessages(prev => [...prev, { id: messageId('bot'), role: 'bot', text: reply.message, buttons: reply.buttons }])
+      setMessages(prev => [...prev, {
+        id: messageId('bot'),
+        role: 'bot',
+        text: reply.message,
+        buttons: reply.buttons,
+        featureCode: reply.feature_code ?? undefined,
+        data: reply.feature_data?.length ? reply.feature_data : undefined,
+      }])
     } catch {
       setMessages(prev => [...prev, { id: messageId('error'), role: 'system', text: '챗봇 서버 연결에 실패했습니다. 상담 서비스를 확인해주세요.' }])
     } finally {
@@ -997,6 +1430,19 @@ export default function ChatbotWidget() {
         }
         return
       }
+
+      if (featureCode === 'CASH_FLOW_RECOMMEND') {
+        const cid = customerNo.trim() || getCurrentDepositCustomerId()
+        const answer = await answerCashflowRecommend(cid, userText)
+        const result = buildFeatureResult('CASH_FLOW_RECOMMEND', answer, [])
+        if (replaceMessages) {
+          setMessages((current) => [...current, addFeatureResult(result)])
+        } else {
+          pushMessages([addFeatureResult(result)])
+        }
+        return
+      }
+
 
       if (featureCode === 'MY_PRODUCTS') {
         const cid = customerNo.trim() || getCurrentDepositCustomerId()
@@ -1034,14 +1480,7 @@ export default function ChatbotWidget() {
         product_type: (featureCode as string) === 'PRODUCT_GUIDE' ? inferProductType(userText) : undefined,
         chatbot_consultation_id: consultationId ?? undefined,
       })
-      if (featureCode === 'CASH_FLOW_RECOMMEND') {
-        saveRecommendContext(result)
-        setMessages(prev => [
-          ...prev.filter(m => m.featureCode !== 'CASH_FLOW_RECOMMEND'),
-          addFeatureResult(result),
-        ])
-        window.setTimeout(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, 50)
-      } else if (replaceMessages) {
+      if (replaceMessages) {
         setMessages((current) => [...current, addFeatureResult(result)])
       } else {
         pushMessages([addFeatureResult(result)])
@@ -1062,6 +1501,54 @@ export default function ChatbotWidget() {
     }
   }
 
+  async function handleFileSelected(file: File) {
+    if (!file) return
+    const action = pendingFileAction
+    setPendingFileAction(null)
+
+    if (action === 'ENROLLMENT') {
+      pushMessages([{ id: messageId('user'), role: 'user', text: `📎 ${file.name} 제출` }])
+      setLoading(true)
+      try {
+        const result = await uploadDocument(file, customerNo || 'GUEST', 'ENROLLMENT')
+        pushMessages([{ id: messageId('bot'), role: 'bot', text: result.message }])
+      } catch {
+        pushMessages([{ id: messageId('bot'), role: 'bot', text: '서류 제출 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }])
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    // PDF text extraction using pdfjs-dist
+    pushMessages([{ id: messageId('user'), role: 'user', text: `📎 ${file.name} 분석 중...` }])
+    setLoading(true)
+    try {
+      const pdfjsLib = await import('pdfjs-dist')
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+      const arrayBuffer = await file.arrayBuffer()
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+      const texts: string[] = []
+      for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
+        const page = await pdf.getPage(i)
+        const content = await page.getTextContent()
+        texts.push(content.items.map((item) => ('str' in item ? (item.str ?? '') : '')).join(' '))
+      }
+      const fullText = texts.join('\n')
+      if (!fullText.trim()) {
+        pushMessages([{ id: messageId('bot'), role: 'bot', text: 'PDF에서 텍스트를 추출할 수 없습니다. 스캔 이미지 PDF는 지원되지 않습니다.' }])
+        return
+      }
+      const analyzeType = action as 'CASH_FLOW' | 'TERMS' | 'PRODUCT'
+      const result = await analyzeFile(fullText, analyzeType, customerNo || undefined)
+      pushMessages([{ id: messageId('bot'), role: 'bot', text: result.result }])
+    } catch {
+      pushMessages([{ id: messageId('bot'), role: 'bot', text: '파일 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleQuickAction(action: (typeof quickActions)[number]) {
     if (loading) return
 
@@ -1077,7 +1564,7 @@ export default function ChatbotWidget() {
       return
     }
     if (action.type === 'recommend') {
-      setProductSearchState({ step: 'period', period: '', amount: '', productType: null, purpose: null })
+      setProductSearchState({ step: 'period', period: '', amount: '', productType: null, purpose: null, minRate: '' })
       return
     }
     if (action.type === 'my_products') {
@@ -1900,8 +2387,8 @@ export default function ChatbotWidget() {
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
                 {/* 진행 단계 표시 */}
                 <div className="flex gap-1">
-                  {(['period','amount','type','purpose'] as const).map((s, i) => (
-                    <div key={s} className={`flex-1 h-1 rounded-full ${(['period','amount','type','purpose'] as const).indexOf(productSearchState.step as 'period'|'amount'|'type'|'purpose') >= i ? 'bg-[#2D6A4F]' : 'bg-kb-border'}`} />
+                  {(['period','amount','type','rate','purpose'] as const).map((s, i) => (
+                    <div key={s} className={`flex-1 h-1 rounded-full ${(['period','amount','type','rate','purpose'] as const).indexOf(productSearchState.step as 'period'|'amount'|'type'|'rate'|'purpose') >= i ? 'bg-[#2D6A4F]' : 'bg-kb-border'}`} />
                   ))}
                 </div>
 
@@ -1988,7 +2475,7 @@ export default function ChatbotWidget() {
                               setLoading(false)
                             }
                           } else {
-                            setProductSearchState(s => s && { ...s, productType: val as 'DEPOSIT' | 'SAVINGS', step: 'purpose' })
+                            setProductSearchState(s => s && { ...s, productType: val as 'DEPOSIT' | 'SAVINGS', step: 'rate' })
                           }
                         }}
                         className="w-full rounded border border-kb-border px-3 py-2 text-xs font-bold text-left hover:border-[#2D6A4F] hover:bg-[#EAF4EF]">
@@ -1998,24 +2485,60 @@ export default function ChatbotWidget() {
                   </div>
                 )}
 
-                {/* Step 4: 목적 (예금/적금만) */}
+                {/* Step 4: 최소 금리 */}
+                {productSearchState.step === 'rate' && (
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold text-kb-text">최소 금리를 선택해주세요 <span className="font-normal text-kb-text-muted">(선택 안 하면 전체)</span></p>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {['1%','2%','3%','4%'].map(v => (
+                        <button key={v} type="button"
+                          onClick={() => setProductSearchState(s => s && { ...s, minRate: v.replace('%',''), step: 'purpose' })}
+                          className="rounded border border-kb-border py-1.5 text-[11px] hover:border-[#2D6A4F] hover:bg-[#EAF4EF]">
+                          {v} 이상
+                        </button>
+                      ))}
+                    </div>
+                    <input type="number" placeholder="직접 입력 (예: 3.5)"
+                      value={productSearchState.minRate}
+                      onChange={e => setProductSearchState(s => s && { ...s, minRate: e.target.value })}
+                      onKeyDown={e => e.key === 'Enter' && setProductSearchState(s => s && { ...s, step: 'purpose' })}
+                      className="w-full rounded border border-kb-border px-3 py-2 text-xs outline-none focus:border-[#2D6A4F]" />
+                    <div className="flex gap-2">
+                      <button type="button"
+                        onClick={() => setProductSearchState(s => s && { ...s, minRate: '', step: 'purpose' })}
+                        className="flex-1 rounded border border-kb-border py-2 text-xs font-bold text-kb-text-muted hover:bg-[#F0F0F0]">
+                        제한 없음
+                      </button>
+                      <button type="button"
+                        onClick={() => setProductSearchState(s => s && { ...s, step: 'purpose' })}
+                        className="flex-1 rounded bg-[#2D6A4F] py-2 text-xs font-bold text-white hover:bg-[#24563F]">
+                        다음
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 5: 목적 (예금/적금만) */}
                 {productSearchState.step === 'purpose' && (
                   <div className="space-y-3">
                     <p className="text-xs font-bold text-kb-text">가입 목적을 선택해주세요</p>
                     {productSearchState.productType === 'DEPOSIT' && (
                       <button type="button"
                         onClick={async () => {
+                          const snap = productSearchState
                           setProductSearchState(null)
                           setLoading(true)
                           const cid = customerNo.trim() || getCurrentDepositCustomerId()
-                          pushMessages([{ id: messageId('user'), role: 'user', text: '목돈 굴리기 - 예금 추천 요청' }])
+                          const parsedAmount = parseKoreanAmount(snap.amount)
+                          pushMessages([{ id: messageId('user'), role: 'user', text: `목돈 굴리기 - 예금 추천 (기간 ${snap.period}개월, 금액 ${parsedAmount.toLocaleString()}원)` }])
                           try {
-                            const result = await executeChatbotFeature('CASH_FLOW_RECOMMEND', {
+                            const result = await executeChatbotFeature('PRODUCT_SEARCH', {
                               customer_no: cid,
-                              query: '목돈 굴리기 예금 추천',
+                              product_type: 'DEPOSIT',
+                              period: Number(snap.period),
+                              amount: parsedAmount,
                             })
-                            saveRecommendContext(result)
-                            setMessages(prev => [...prev.filter(m => m.featureCode !== 'CASH_FLOW_RECOMMEND'), addFeatureResult(result)])
+                            pushMessages([addFeatureResult(result)])
                             window.setTimeout(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, 50)
                           } catch {
                             pushMessages([{ id: messageId('error'), role: 'system', text: '조회 중 오류가 발생했습니다.' }])
@@ -2028,17 +2551,20 @@ export default function ChatbotWidget() {
                     {productSearchState.productType === 'SAVINGS' && (
                       <button type="button"
                         onClick={async () => {
+                          const snap = productSearchState
                           setProductSearchState(null)
                           setLoading(true)
                           const cid = customerNo.trim() || getCurrentDepositCustomerId()
-                          pushMessages([{ id: messageId('user'), role: 'user', text: '매달 저축 - 적금 추천 요청' }])
+                          const parsedAmount = parseKoreanAmount(snap.amount)
+                          pushMessages([{ id: messageId('user'), role: 'user', text: `매달 저축 - 적금 추천 (기간 ${snap.period}개월, 월납입 ${parsedAmount.toLocaleString()}원)` }])
                           try {
-                            const result = await executeChatbotFeature('CASH_FLOW_RECOMMEND', {
+                            const result = await executeChatbotFeature('PRODUCT_SEARCH', {
                               customer_no: cid,
-                              query: '매달 저축 적금 추천',
+                              product_type: 'SAVINGS',
+                              period: Number(snap.period),
+                              amount: parsedAmount,
                             })
-                            saveRecommendContext(result)
-                            setMessages(prev => [...prev.filter(m => m.featureCode !== 'CASH_FLOW_RECOMMEND'), addFeatureResult(result)])
+                            pushMessages([addFeatureResult(result)])
                             window.setTimeout(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, 50)
                           } catch {
                             pushMessages([{ id: messageId('error'), role: 'system', text: '조회 중 오류가 발생했습니다.' }])
@@ -2051,7 +2577,30 @@ export default function ChatbotWidget() {
                   </div>
                 )}
               </div>
-            </>) : (<>
+            </>) : !isLoggedIn ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-6 bg-[#FBFAF7] px-6 py-10 text-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#EAF4EF]">
+                  <Bot className="h-8 w-8 text-[#2D6A4F]" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-base font-bold text-kb-text">로그인이 필요한 서비스입니다</p>
+                  <p className="text-xs text-kb-text-muted">로그인 후 맞춤 상품 추천, 계좌 조회 등<br />다양한 챗봇 기능을 이용하실 수 있습니다.</p>
+                </div>
+                <a
+                  href="/login"
+                  className="rounded-lg bg-[#2D6A4F] px-6 py-3 text-sm font-bold text-white hover:bg-[#245a42]"
+                >
+                  로그인하기
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setIsLoggedIn(true)}
+                  className="text-xs text-kb-text-muted underline"
+                >
+                  비회원으로 계속하기
+                </button>
+              </div>
+            ) : (<>
 
             <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto bg-[#FBFAF7] px-4 py-4">
               {messages.map((message) => (
@@ -2086,9 +2635,20 @@ export default function ChatbotWidget() {
                               ? <p className="text-[10px] text-kb-text-muted text-center py-2">추천 상품 없음</p>
                               : rows.map((row, i) => (
                               <div key={i} className="rounded border border-kb-border bg-white p-2 text-xs">
-                                <div className="flex items-start gap-1.5 mb-0.5">
-                                  <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold text-white mt-0.5" style={{ backgroundColor: accentColor }}>{i + 1}위</span>
-                                  <p className="font-bold text-kb-text leading-tight text-[11px]">{String(row.deposit_product_name ?? row.product_name ?? '')}</p>
+                                <div className="flex items-start justify-between gap-1.5 mb-0.5">
+                                  <div className="flex items-start gap-1.5 min-w-0">
+                                    <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold text-white mt-0.5" style={{ backgroundColor: accentColor }}>{i + 1}위</span>
+                                    <p className="font-bold text-kb-text leading-tight text-[11px]">{String(row.deposit_product_name ?? row.product_name ?? '')}</p>
+                                  </div>
+                                  {Number(row.product_id) > 0 && (
+                                    <a
+                                      href={`/products/deposit/join/product-${Number(row.product_id)}`}
+                                      onClick={e => { e.stopPropagation(); setOpen(false) }}
+                                      className="flex-shrink-0 rounded border border-[#2D6A4F] bg-[#EAF4EF] px-2 py-0.5 text-[10px] font-bold text-[#2D6A4F] hover:bg-[#D0EBE0]"
+                                    >
+                                      가입
+                                    </a>
+                                  )}
                                 </div>
                                 <div className="flex flex-wrap gap-x-2 text-[10px] text-kb-text-muted ml-0.5">
                                   <span>금리 <b style={{ color: accentColor }}>{row.base_interest_rate != null ? `${row.base_interest_rate}%` : '-'}</b></span>
@@ -2131,6 +2691,108 @@ export default function ChatbotWidget() {
                         )
                       }
 
+                      if (message.featureCode === 'SAVINGS_GOAL' && message.data && message.data.some(r => r.row_type === 'savings_goal_product')) {
+                        const goalRows = message.data.filter(r => r.row_type === 'savings_goal_product')
+                        const rankLabel = ['🥇 1위', '🥈 2위', '🥉 3위']
+                        return (
+                          <div className="mt-3 space-y-2">
+                            {goalRows.map((row, index) => {
+                              const achievable = Boolean(row.achievable)
+                              const plan: {month:number,cumulative:number,interest_earned:number,on_track:boolean}[] = Array.isArray(row.monthly_plan) ? row.monthly_plan : []
+                              const step = Math.max(1, Math.floor(plan.length / 4))
+                              const midPlan = plan.filter((_, i) => (i + 1) % step === 0).slice(0, 4)
+                              return (
+                                <div key={index} className={`rounded border p-3 text-xs space-y-2 ${achievable ? 'border-[#2D6A4F] bg-[#EAF4EF]' : 'border-orange-300 bg-orange-50'}`}>
+                                  {/* 순위 + 상품명 + 가입하기 */}
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="flex-shrink-0 rounded bg-[#1a3a5c] px-2 py-0.5 text-[10px] font-bold text-white">
+                                      {rankLabel[index] ?? `${index + 1}위`}
+                                    </span>
+                                    <span className={`flex-shrink-0 rounded px-2 py-0.5 text-[10px] font-bold text-white ${achievable ? 'bg-[#2D6A4F]' : 'bg-orange-400'}`}>
+                                      {achievable ? '✅ 달성 가능' : '⚠️ 달성 어려움'}
+                                    </span>
+                                    <p className="font-bold text-kb-text flex-1 text-[11px]">{String(row.product_name ?? '')}</p>
+                                    {Number(row.product_id) > 0 && (
+                                      <a href={`/products/deposit/join/product-${row.product_id}`} target="_blank" rel="noopener noreferrer"
+                                        className="flex-shrink-0 rounded bg-[#1a5fa8] px-2 py-0.5 text-[10px] font-bold text-white hover:bg-[#164d8a]">
+                                        가입하기
+                                      </a>
+                                    )}
+                                  </div>
+                                  {/* 핵심 수치 */}
+                                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                                    <span>금리 <span className="font-bold text-[#2D6A4F]">{String(row.base_interest_rate)}%</span></span>
+                                    <span>만기수령 <span className="font-bold text-kb-text">{Number(row.maturity_amount).toLocaleString()}원</span></span>
+                                    <span>이자 <span className="font-bold text-[#2D6A4F]">+{Number(row.interest_amount).toLocaleString()}원</span></span>
+                                    {row.required_monthly != null && (
+                                      <span>월납입 <span className="font-bold text-kb-text">{Number(row.required_monthly).toLocaleString()}원</span></span>
+                                    )}
+                                    <span>기간 <span className="font-bold text-kb-text">{String(row.goal_months)}개월</span></span>
+                                  </div>
+                                  {/* 1위 상품에만 납입 계획표 */}
+                                  {index === 0 && midPlan.length > 0 && (
+                                    <div className="mt-1">
+                                      <p className="text-[10px] text-kb-text-muted mb-1">납입 계획표</p>
+                                      <div className="grid grid-cols-4 gap-1">
+                                        {midPlan.map(pt => (
+                                          <div key={pt.month} className={`rounded p-1 text-center text-[10px] ${pt.on_track ? 'bg-[#2D6A4F]/10' : 'bg-orange-100'}`}>
+                                            <p className="text-kb-text-muted">{pt.month}개월</p>
+                                            <p className="font-bold text-kb-text">{(pt.cumulative / 10000).toFixed(0)}만</p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      }
+
+                      if (message.featureCode === 'PRODUCT_COMPARE' && message.data && message.data.some(r => r.row_type === 'compare_product')) {
+                        const row = message.data.find(r => r.row_type === 'compare_product')!
+                        const pa = row.product_a as Record<string, unknown>
+                        const pb = row.product_b as Record<string, unknown>
+                        const items = row.compare_items as {label:string, a:string, b:string}[]
+                        const analysis = String(row.analysis ?? '')
+                        return (
+                          <div className="mt-3 space-y-2 text-xs">
+                            {/* 상품명 헤더 + 가입하기 버튼 */}
+                            <div className="grid grid-cols-3 gap-1">
+                              <div />
+                              {[pa, pb].map((p, i) => (
+                                <div key={i} className="rounded bg-[#1a3a5c] p-2 text-center text-[10px] font-bold text-white">
+                                  <p>{String(p.product_name ?? '')}</p>
+                                  {Number(p.product_id) > 0 && (
+                                    <a href={`/products/deposit/join/product-${p.product_id}`} target="_blank" rel="noopener noreferrer"
+                                      className="mt-1 inline-block rounded bg-white px-2 py-0.5 text-[9px] font-bold text-[#1a3a5c] hover:bg-gray-100">
+                                      가입하기
+                                    </a>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                            {/* 비교 테이블 */}
+                            {items.map((item, i) => (
+                              <div key={i} className={`grid grid-cols-3 gap-1 rounded px-1 py-1 ${i % 2 === 0 ? 'bg-gray-50' : 'bg-white'}`}>
+                                <span className="text-[10px] font-semibold text-kb-text-muted flex items-center">{item.label}</span>
+                                {[item.a, item.b].map((val, j) => (
+                                  <span key={j} className="text-center text-[11px] font-medium text-kb-text">{val}</span>
+                                ))}
+                              </div>
+                            ))}
+                            {/* GPT 분석 */}
+                            {analysis && (
+                              <div className="mt-2 rounded border border-[#2D6A4F] bg-[#EAF4EF] p-2 text-[11px] text-kb-text whitespace-pre-line">
+                                <p className="mb-1 text-[10px] font-bold text-[#2D6A4F]">💡 AI 분석</p>
+                                {analysis}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      }
+
                       if (message.featureCode === 'PRODUCT_GUIDE' || message.featureCode === 'CASH_FLOW_RECOMMEND' || message.featureCode === 'PRODUCT_SEARCH') {
                         const productRows = message.featureCode === 'CASH_FLOW_RECOMMEND'
                           ? message.data!.filter(r => r.row_type === 'recommended_product')
@@ -2145,7 +2807,17 @@ export default function ChatbotWidget() {
                                     {String(row.rank)}위
                                   </span>
                                 )}
-                                <p className="font-bold text-kb-text">{String(row.deposit_product_name ?? row.product_name ?? '')}</p>
+                                <p className="font-bold text-kb-text flex-1">{String(row.deposit_product_name ?? row.product_name ?? '')}</p>
+                                {row.product_id != null && Number(row.product_id) > 0 && (
+                                  <a
+                                    href={`/products/deposit/join/product-${row.product_id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex-shrink-0 rounded bg-[#1a5fa8] px-2 py-0.5 text-[10px] font-bold text-white hover:bg-[#164d8a]"
+                                  >
+                                    가입하기
+                                  </a>
+                                )}
                               </div>
                               <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-kb-text-muted">
                                 <span>금리 <span className="font-bold text-[#2D6A4F]">{row.base_interest_rate != null ? `${row.base_interest_rate}%` : '-'}</span></span>
@@ -2196,6 +2868,15 @@ export default function ChatbotWidget() {
                                   <span className="block truncate text-[11px] text-kb-text-muted">{summary.meta}</span>
                                 </button>
                                 <div className="flex flex-none items-center gap-1.5">
+                                  {(row.row_type === 'recommended_product' || message.featureCode === 'PRODUCT_SEARCH_COMPARE') && Number(row.product_id) > 0 && (
+                                    <a
+                                      href={`/products/deposit/join/product-${Number(row.product_id)}`}
+                                      onClick={e => { e.stopPropagation(); setOpen(false) }}
+                                      className="rounded border border-[#2D6A4F] bg-[#EAF4EF] px-2 py-0.5 text-[10px] font-bold text-[#2D6A4F] hover:bg-[#D0EBE0]"
+                                    >
+                                      가입
+                                    </a>
+                                  )}
                                   {message.featureCode === 'MY_PRODUCTS' && canShowTransferButton(row) && (
                                     <button
                                       type="button"
@@ -2328,7 +3009,7 @@ export default function ChatbotWidget() {
                           const query = pending.replace('product_guide:', '')
                           handleFeature('PRODUCT_GUIDE', query, false)
                         } else if (pending === 'recommend') {
-                          setProductSearchState({ step: 'period', period: '', amount: '', productType: null, purpose: null })
+                          setProductSearchState({ step: 'period', period: '', amount: '', productType: null, purpose: null, minRate: '' })
                         } else {
                           // my_products: isLoggedIn이 아직 setState 반영 전이므로 직접 실행
                           const cidVal = cid || customerNo.trim() || getCurrentDepositCustomerId()
@@ -2402,7 +3083,53 @@ export default function ChatbotWidget() {
                 ))}
               </div>
 
+              {/* 파일 첨부 메뉴 */}
+              {showFileMenu && (
+                <div className="mb-2 rounded border border-kb-border bg-white shadow-md">
+                  {[
+                    { action: 'CASH_FLOW' as const, label: '📊 타행 거래내역 분석', accept: '.pdf' },
+                    { action: 'TERMS' as const, label: '📋 약관 설명', accept: '.pdf' },
+                    { action: 'PRODUCT' as const, label: '📄 상품 설명서 안내', accept: '.pdf' },
+                    { action: 'ENROLLMENT' as const, label: '📁 서류 제출', accept: '.pdf,.jpg,.jpeg,.png' },
+                  ].map(({ action, label, accept }) => (
+                    <button
+                      key={action}
+                      type="button"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-kb-beige"
+                      onClick={() => {
+                        setPendingFileAction(action)
+                        setShowFileMenu(false)
+                        if (fileInputRef.current) {
+                          fileInputRef.current.accept = accept
+                          fileInputRef.current.click()
+                        }
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) handleFileSelected(f)
+                  e.target.value = ''
+                }}
+              />
               <form onSubmit={submitMessage} className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setShowFileMenu((v) => !v)}
+                  className="flex h-10 w-10 items-center justify-center rounded border border-kb-border text-kb-text-muted transition hover:bg-kb-beige disabled:opacity-40"
+                  aria-label="파일 첨부"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
                 <input
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
@@ -2422,6 +3149,7 @@ export default function ChatbotWidget() {
             </>)}
 
           </section>
+
         </div>,
         document.body,
       )
