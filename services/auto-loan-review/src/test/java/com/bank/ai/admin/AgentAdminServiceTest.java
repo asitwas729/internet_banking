@@ -19,6 +19,7 @@ import com.bank.ai.rule.domain.TrackDecision;
 import com.bank.ai.rule.service.TrackClassifier;
 import com.bank.ai.shadow.ShadowRunProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.bank.ai.admin.AgentStatusResponse;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,6 +64,32 @@ class AgentAdminServiceTest {
 
     @InjectMocks
     AgentAdminService service;
+
+    // ── buildStatus ──────────────────────────────────────────────────────────
+
+    @Test
+    void buildStatus_에이전트_상태_스냅샷_반환() {
+        when(agentProperties.enabled()).thenReturn(true);
+        when(rateMeter.getRpmRemaining()).thenReturn(13);
+        when(rateMeter.getRpdRemaining()).thenReturn(1450);
+        when(llmProperties.model()).thenReturn("gemini-2.5-flash");
+        when(auditLogProperties.promptVersion()).thenReturn("v2");
+        when(shadowRunProperties.enabled()).thenReturn(false);
+        when(driftProperties.enabled()).thenReturn(true);
+
+        AgentStatusResponse result = service.buildStatus();
+
+        assertThat(result.agentEnabled()).isTrue();
+        assertThat(result.rpmRemaining()).isEqualTo(13);
+        assertThat(result.rpdRemaining()).isEqualTo(1450);
+        assertThat(result.currentModel()).isEqualTo("gemini-2.5-flash");
+        assertThat(result.currentPromptVersion()).isEqualTo("v2");
+        assertThat(result.shadowModeEnabled()).isFalse();
+        assertThat(result.driftDetectionEnabled()).isTrue();
+        assertThat(result.totalRunsSinceStart()).isZero();
+        verify(actionAuditService).record(
+                argThat(r -> "QUERY_STATUS".equals(r.action()) && "SUCCESS".equals(r.result())));
+    }
 
     // ── getAuditLog ───────────────────────────────────────────────────────────
 

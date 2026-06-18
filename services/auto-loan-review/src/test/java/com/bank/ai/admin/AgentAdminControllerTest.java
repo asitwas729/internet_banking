@@ -4,6 +4,7 @@ import com.bank.ai.agent.AgentOpinion;
 import com.bank.ai.agent.FallbackReason;
 import com.bank.ai.agent.RiskLevel;
 import com.bank.ai.audit.AgentAuditRecord;
+import com.bank.ai.admin.AgentStatusResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,27 @@ class AgentAdminControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+    }
+
+    // ── GET /admin/status ─────────────────────────────────────────────────────
+
+    @Test
+    void getStatus_200과_상태_스냅샷_반환() throws Exception {
+        var statusResponse = new AgentStatusResponse(
+                true, 12, 1480, 42L, 3L, 1L, "stub-v1", "v1", false, true);
+        when(adminService.buildStatus()).thenReturn(statusResponse);
+
+        mockMvc.perform(get("/admin/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.agentEnabled").value(true))
+                .andExpect(jsonPath("$.rpmRemaining").value(12))
+                .andExpect(jsonPath("$.rpdRemaining").value(1480))
+                .andExpect(jsonPath("$.currentModel").value("stub-v1"))
+                .andExpect(jsonPath("$.currentPromptVersion").value("v1"))
+                .andExpect(jsonPath("$.shadowModeEnabled").value(false))
+                .andExpect(jsonPath("$.driftDetectionEnabled").value(true))
+                .andExpect(jsonPath("$.totalRunsSinceStart").value(42))
+                .andExpect(jsonPath("$.fallbacksSinceStart").value(3));
     }
 
     // ── GET /admin/audit/{revId} ──────────────────────────────────────────────
