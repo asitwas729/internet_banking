@@ -40,6 +40,7 @@ class AgentAdminServiceTest {
     @Mock AutoReviewService autoReviewService;
     @Mock TrackClassifier trackClassifier;
     @Mock PreReviewAgentService agentService;
+    @Mock AdminActionAuditService actionAuditService;
 
     private AgentAdminService service;
 
@@ -47,7 +48,7 @@ class AgentAdminServiceTest {
     void setUp() {
         service = new AgentAdminService(
                 auditLogService, autoReviewService, trackClassifier,
-                agentService, new ObjectMapper());
+                agentService, actionAuditService, new ObjectMapper());
     }
 
     // ── getAuditLog ───────────────────────────────────────────────────────────
