@@ -134,9 +134,12 @@ def synthesize(personas: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
     monthly_cashflow_mean = annual_income / 12
     monthly_cashflow_std = monthly_cashflow_mean * rng.uniform(0.05, 0.35, size=n)
 
-    # 6) 연체 이력 (분위가 낮을수록 확률 ↑)
-    deli_rate = np.array([0.20, 0.12, 0.07, 0.04, 0.02])
-    delinquency_history_24m = (rng.random(n) < np.take(deli_rate, quintile)).astype(int)
+    # 6) 연체 이력 — NegativeBinomial(n=2, p=분위별) — D1 수정
+    # p 높을수록 성공(무연체) 확률 ↑ → 카운트 평균=2(1-p)/p; overall mean ≈ 0.38
+    _NB_P = np.array([0.70, 0.78, 0.85, 0.90, 0.95])
+    delinquency_history_24m = rng.negative_binomial(
+        n=2, p=np.take(_NB_P, quintile), size=n
+    )
 
     # 7) credit_score_proxy — Home Credit EXT_SOURCE 분포 매핑
     ext = _load_ext_source_distribution()
