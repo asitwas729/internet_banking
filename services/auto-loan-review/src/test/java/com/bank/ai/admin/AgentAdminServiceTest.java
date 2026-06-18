@@ -30,7 +30,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -62,16 +63,20 @@ class AgentAdminServiceTest {
 
         assertThat(result.revId()).isEqualTo(101L);
         assertThat(result.track()).isEqualTo("TRACK_1");
+        verify(actionAuditService).record(
+                argThat(r -> "QUERY_AUDIT_LOG".equals(r.action()) && "SUCCESS".equals(r.result())));
     }
 
     @Test
-    void getAuditLog_없는revId_404_예외() {
+    void getAuditLog_없는revId_404_예외_그리고_FAILURE_감사기록() {
         when(auditLogService.findLatestByRevId(999L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getAuditLog(999L))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
                         .isEqualTo(HttpStatus.NOT_FOUND));
+        verify(actionAuditService).record(
+                argThat(r -> "QUERY_AUDIT_LOG".equals(r.action()) && "FAILURE".equals(r.result())));
     }
 
     // ── replayDryRun ──────────────────────────────────────────────────────────
@@ -103,16 +108,20 @@ class AgentAdminServiceTest {
         assertThat(result.originalInputHash()).isEqualTo(hash);
         assertThat(result.replayedInputHash()).isEqualTo(hash);
         assertThat(result.replayedOpinion().fallbackReason()).isNull();
+        verify(actionAuditService).record(
+                argThat(r -> "REPLAY_DRY_RUN".equals(r.action()) && "SUCCESS".equals(r.result())));
     }
 
     @Test
-    void replayDryRun_없는revId_404_예외() {
+    void replayDryRun_없는revId_404_예외_그리고_FAILURE_감사기록() {
         when(auditLogService.findLatestByRevId(999L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.replayDryRun(999L))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
                         .isEqualTo(HttpStatus.NOT_FOUND));
+        verify(actionAuditService).record(
+                argThat(r -> "REPLAY_DRY_RUN".equals(r.action()) && "FAILURE".equals(r.result())));
     }
 
     @Test
