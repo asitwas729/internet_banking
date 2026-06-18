@@ -76,7 +76,7 @@ class AuditLogServiceTest {
                 {"schema_version":"v1","risk_level":"MEDIUM","policy_flags":[]}
                 """.strip();
         var record = new AgentAuditRecord(
-                1003L, "TRACK_3", "{}", opinionJson, "[]", null, true, null);
+                1003L, "TRACK_3", "{}", opinionJson, "[]", null, true, null, null, null, null);
 
         auditLogService.record(record);
 
@@ -147,15 +147,19 @@ class AuditLogServiceTest {
     // ── 헬퍼 ─────────────────────────────────────────────────────────────────
 
     private static AgentAuditRecord sampleRecord(Long revId, String track, String fallbackReason) {
+        String requestJson = "{\"age\":35,\"productCode\":\"MORT_001\"}";
         return new AgentAuditRecord(
                 revId,
                 track,
-                "{\"age\":35,\"productCode\":\"MORT_001\"}",
+                requestJson,
                 "{\"schema_version\":\"v1\",\"risk_level\":\"LOW\"}",
                 "[]",
                 null,
                 true,
-                fallbackReason
+                fallbackReason,
+                AgentAuditRecord.sha256Hex(requestJson),
+                "stub-v1",
+                "v1"
         );
     }
 }

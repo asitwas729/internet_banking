@@ -8,9 +8,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "ai.audit")
 public record AuditLogProperties(
         boolean enabled,
-        boolean includeRawLlmResponse
+        boolean includeRawLlmResponse,
+        String promptVersion
 ) {
     public AuditLogProperties() {
-        this(true, false);
+        this(true, false, "v1");
     }
 }

@@ -6,6 +6,7 @@ import com.bank.ai.agent.PreReviewAgentService;
 import com.bank.ai.agent.RiskLevel;
 import com.bank.ai.audit.AuditLogProperties;
 import com.bank.ai.audit.AuditLogService;
+import com.bank.ai.llm.config.LlmProperties;
 import com.bank.ai.llm.purpose.PurposeAnalysis;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
 import com.bank.ai.llm.report.ReviewReport;
@@ -84,7 +85,9 @@ class AutoReviewEventListenerTest {
         listener = new AutoReviewEventListener(
                 purposeAnalysisService, reviewReportService, preReviewAgentService,
                 ragRetrievalService, loanServiceClient, auditLogService,
-                new AuditLogProperties(true, false),
+                new AuditLogProperties(true, false, "v1"),
+                new LlmProperties(true, LlmProperties.Provider.STUB, "stub-v1",
+                        512, 0.0, 1_000_000L, "", "", 1500, 15),
                 metricsRecorder,
                 objectMapper);
         lenient().when(ragRetrievalService.retrieve(any(), any(), any(), any(), any()))

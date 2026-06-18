@@ -6,6 +6,7 @@ import com.bank.ai.agent.PreReviewAgentService;
 import com.bank.ai.audit.AgentAuditRecord;
 import com.bank.ai.audit.AuditLogProperties;
 import com.bank.ai.audit.AuditLogService;
+import com.bank.ai.llm.config.LlmProperties;
 import com.bank.ai.llm.purpose.PurposeAnalysis;
 import com.bank.ai.llm.purpose.PurposeAnalysisInput;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
@@ -65,6 +66,7 @@ public class AutoReviewEventListener {
     private final LoanServiceClient loanServiceClient;
     private final AuditLogService auditLogService;
     private final AuditLogProperties auditLogProperties;
+    private final LlmProperties llmProperties;
     private final AgentMetricsRecorder metricsRecorder;
     private final ObjectMapper objectMapper;
 
@@ -142,7 +144,8 @@ public class AutoReviewEventListener {
                              String agentOpinionJson) {
         try {
             var auditRecord = AgentAuditRecord.from(
-                    event, opinion, objectMapper, auditLogProperties.includeRawLlmResponse());
+                    event, opinion, objectMapper, auditLogProperties.includeRawLlmResponse(),
+                    llmProperties.model(), auditLogProperties.promptVersion());
             auditLogService.record(auditRecord);
 
             // 감사 로그 크기 메트릭 — opinionJson UTF-8 byte 기준

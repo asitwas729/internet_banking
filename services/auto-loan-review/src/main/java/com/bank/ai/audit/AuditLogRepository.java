@@ -25,11 +25,13 @@ public class AuditLogRepository {
             INSERT INTO agent_audit_log
               (rev_id, schema_version, track,
                request_snapshot, opinion_json, tool_calls_json,
-               raw_llm_response, pii_masked, fallback_reason, created_at)
+               raw_llm_response, pii_masked, fallback_reason,
+               input_hash, model_version, prompt_version, created_at)
             VALUES
               (:revId, 'v1', :track,
                CAST(:requestSnapshot AS VARCHAR), CAST(:opinionJson AS VARCHAR), CAST(:toolCallsJson AS VARCHAR),
-               :rawLlmResponse, :piiMasked, :fallbackReason, :createdAt)
+               :rawLlmResponse, :piiMasked, :fallbackReason,
+               :inputHash, :modelVersion, :promptVersion, :createdAt)
             """;
 
     private static final String SELECT_BY_REV_ID = """
@@ -37,7 +39,8 @@ public class AuditLogRepository {
                    CAST(request_snapshot AS VARCHAR) AS request_snapshot,
                    CAST(opinion_json AS VARCHAR) AS opinion_json,
                    CAST(tool_calls_json AS VARCHAR) AS tool_calls_json,
-                   raw_llm_response, pii_masked, fallback_reason
+                   raw_llm_response, pii_masked, fallback_reason,
+                   input_hash, model_version, prompt_version
             FROM agent_audit_log
             WHERE rev_id = :revId
             ORDER BY created_at DESC
@@ -59,6 +62,9 @@ public class AuditLogRepository {
                 .addValue("rawLlmResponse", record.rawLlmResponse())
                 .addValue("piiMasked", record.piiMasked())
                 .addValue("fallbackReason", record.fallbackReason())
+                .addValue("inputHash", record.inputHash())
+                .addValue("modelVersion", record.modelVersion())
+                .addValue("promptVersion", record.promptVersion())
                 .addValue("createdAt", Timestamp.from(Instant.now()));
 
         jdbc.update(INSERT_SQL, params);
@@ -76,7 +82,10 @@ public class AuditLogRepository {
                         rs.getString("tool_calls_json"),
                         rs.getString("raw_llm_response"),
                         rs.getBoolean("pii_masked"),
-                        rs.getString("fallback_reason")
+                        rs.getString("fallback_reason"),
+                        rs.getString("input_hash"),
+                        rs.getString("model_version"),
+                        rs.getString("prompt_version")
                 ));
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
