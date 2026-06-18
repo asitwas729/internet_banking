@@ -53,17 +53,37 @@ def _load_ext_source_distribution() -> np.ndarray:
     return means
 
 
-def _ext_to_credit_score(values: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+# D3 수정: income_quintile(1~5)별 Beta(α, β) 파라미터 — 분위 상승 → 신용점수 단조 증가
+_BETA_PARAMS: dict[int, tuple[float, float]] = {
+    1: (2, 5), 2: (3, 4), 3: (4, 3), 4: (5, 2), 5: (6, 1.5)
+}
+
+
+def _ext_to_credit_score(
+    values: np.ndarray,
+    income_quintile: np.ndarray,
+    rng: np.random.Generator,
+    base_score: int = 300,
+    score_range: int = 650,
+) -> np.ndarray:
     """EXT_SOURCE 0~1 → 한국 신용점수 300~950 매핑.
 
-    EXT_SOURCE 가 작을수록 default 확률 높으므로 1-x 로 뒤집고 선형 매핑.
+    EXT_SOURCE 결측 시 income_quintile 별 Beta 분포에서 샘플링 (D3 수정).
+    EXT_SOURCE 가용 시 기존 선형 매핑 + quintile 잔차 ±50점 노이즈.
     """
+    n = income_quintile.shape[0]
     if values.size == 0:
-        # fallback: 정규분포(평균 720, std 80)
-        return np.clip(rng.normal(720, 80, size=10_000), 300, 950)
+        scores = np.empty(n, dtype=float)
+        for q, (a, b) in _BETA_PARAMS.items():
+            mask = income_quintile == q
+            if mask.any():
+                scores[mask] = base_score + rng.beta(a, b, size=mask.sum()) * score_range
+        return np.clip(scores, 300, 950)
+    # EXT_SOURCE 가용: 1-x 선형 + quintile 잔차 노이즈
     inverted = 1.0 - values
-    score = 300 + inverted * (950 - 300)
-    return score
+    raw = base_score + inverted * score_range
+    residual = (income_quintile.astype(float) - 3.0) * 16.67  # Q1→-33, Q5→+33
+    return np.clip(raw + residual + rng.normal(0, 15, size=n), 300, 950)
 
 
 def synthesize(personas: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
@@ -129,9 +149,9 @@ def synthesize(personas: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
             mask = quintile == q
             if mask.any():
                 samples[mask] = rng.choice(per_q[q], size=mask.sum(), replace=True)
-        credit_score_proxy = _ext_to_credit_score(samples, rng).astype(int)
+        credit_score_proxy = _ext_to_credit_score(samples, quintile + 1, rng).astype(int)
     else:
-        credit_score_proxy = _ext_to_credit_score(np.array([]), rng)[:n].astype(int)
+        credit_score_proxy = _ext_to_credit_score(np.array([]), quintile + 1, rng).astype(int)
 
     return personas.assign(
         income_quintile=quintile + 1,  # 1~5
