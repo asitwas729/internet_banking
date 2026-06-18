@@ -28,6 +28,9 @@ Thumbs.db
 .env.prod
 *.local
 *.bak
+infra/alertmanager/alertmanager.yml
+# 개발자별 로컬 설정 (시크릿 포함) — 공유 대상 아님
+application-local.yml
 .venv/
 venv/
 env/
@@ -38,6 +41,7 @@ logs/
 
 # Local service launchers
 services/consultation-service/start-*.bat
+start-*.bat
 
 # Java
 *.class
@@ -53,6 +57,15 @@ __pycache__/
 # Docker volumes (compose local 데이터)
 data/
 
+# 브랜치 작업 결과 정리 파일
+PR_*.md
+*_PR.md
+*-result.md
+브랜치_정리_결과.md
+
 # Claude Code (worktree·세션 메타데이터·로컬 설정)
 .claude/
 CLAUDE.local.md
+
+# 개인 이력서 (공유 대상 아님)
+이력서_쉬운버전.md

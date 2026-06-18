@@ -1,4 +1,5 @@
 'use client'
+import { KB_PRIMARY } from '@/lib/theme'
 
 import Link from 'next/link'
 import { useState } from 'react'
@@ -12,7 +13,7 @@ const CERT_STEPS_PERSONAL: { num: string; title: string; desc: string }[] = [
   { num: '02', title: '약관동의 및 사용자 본인 확인', desc: '전자금융거래 기본약관, 전자금융서비스 이용약관, 인증서비스 약관을 확인하고 동의합니다.' },
   { num: '03', title: '발급대상 유료 인증서 선택', desc: '발급하고자 하는 개인용 인증서의 종류와 그 사용범위를 확인하고 선택합니다.\n개인 범용을 선택하는 경우 인증기관을 선택하고 약관에 동의해야 합니다.' },
   { num: '04', title: '전자금융사기 예방서비스', desc: '본인 확인용 추가 인증을 위하여 전자금융사기예방 서비스를 선택합니다.' },
-  { num: '05', title: '출금계좌 및 보안카드 입력', desc: '고객님 인터넷뱅킹에 등록된 출금계좌번호와 계좌비밀번호, 지점에서 수령한 보안카드의 지정된 번호를 입력합니다.' },
+  { num: '05', title: '출금계좌 확인', desc: '고객님 인터넷뱅킹에 등록된 출금계좌번호와 계좌비밀번호를 입력합니다.' },
   { num: '06', title: '수수료 출금 예약확인', desc: '개인 범용 인증서 발급수수료 유료화에 따른 수수료 금액 및 출금계좌번호를 확인합니다.\n(개인 범용: 1년 4,400원, 유효기간 내 재발급 시 면제)' },
   { num: '07', title: '고객 세부 정보 입력', desc: '고객님의 주소, 전화번호 등 세부 정보를 입력합니다.\n입력한 고객 정보는 인증서 발급용으로만 사용됩니다.' },
   { num: '08', title: '인증서 암호 및 저장위치 선정', desc: '인증서 저장 위치를 선택한 후, 앞으로 인증서 로그인 시 사용할 암호를 10~56자리(영문, 숫자, 특수문자 조합)로 입력합니다.' },
@@ -23,7 +24,7 @@ const CERT_STEPS_BANK: { num: string; title: string; desc: string }[] = [
   { num: '01', title: '개인고객 로그인', desc: 'AXful Bank 지점에서 인터넷뱅킹 신청 시 지정한 사용자 아이디(ID)와 사용자 암호를 입력합니다.' },
   { num: '02', title: '약관동의 및 사용자 본인 확인', desc: '전자금융거래 기본약관, 전자금융서비스 이용약관, 인증서비스 약관을 확인하고 동의합니다.' },
   { num: '03', title: '발급대상 인증서 선택', desc: '발급하고자 하는 은행/신용카드/보험용 인증서를 선택합니다.' },
-  { num: '04', title: '출금계좌 및 보안카드 입력', desc: '고객님 인터넷뱅킹에 등록된 출금계좌번호와 계좌비밀번호, 보안카드의 지정된 번호를 입력합니다.' },
+  { num: '04', title: '출금계좌 확인', desc: '고객님 인터넷뱅킹에 등록된 출금계좌번호와 계좌비밀번호를 입력합니다.' },
   { num: '05', title: '고객 세부 정보 입력', desc: '고객님의 주소, 전화번호 등 세부 정보를 입력합니다.' },
   { num: '06', title: '인증서 암호 및 저장위치 선정', desc: '인증서 저장 위치를 선택한 후, 인증서 로그인 시 사용할 암호를 입력합니다.' },
   { num: '07', title: '인증서 발급 완료', desc: '고객님의 은행/신용카드/보험용 인증서가 발급되었습니다.\n인증서 암호를 입력하고 로그인하면 AXful Bank 인터넷뱅킹을 이용하실 수 있습니다.' },
@@ -34,7 +35,7 @@ const OTHER_CERT_STEPS: { num: string; title: string; desc: string }[] = [
   { num: '02', title: '사용자 본인확인', desc: '본인확인 정보를 입력하고 [확인]을 클릭합니다.' },
   { num: '03', title: '인증서 암호 입력', desc: '[인증서 선택]을 클릭하고, 인증서 암호를 입력합니다.' },
   { num: '04', title: '전자금융사기 예방서비스', desc: '본인 확인용 추가 인증을 위하여 전자금융사기예방 서비스를 선택합니다.' },
-  { num: '05', title: '출금계좌 및 보안카드 입력', desc: '고객님 인터넷뱅킹에 등록된 출금계좌번호와 계좌비밀번호, 지점에서 수령한 보안카드의 지정된 번호를 입력합니다.' },
+  { num: '05', title: '출금계좌 확인', desc: '고객님 인터넷뱅킹에 등록된 출금계좌번호와 계좌비밀번호를 입력합니다.' },
   { num: '06', title: '타행·타기관 인증서 등록 내역확인', desc: '타행·타기관 인증서 등록 내역을 확인합니다.' },
   { num: '07', title: '인증서 등록 완료', desc: '타행·타기관에서 발급된 고객님의 인증서가 AXful Bank에 등록되었습니다.\n인증서 암호를 입력하고 로그인하면 AXful Bank 인터넷뱅킹을 편리하게 이용하실 수 있습니다.' },
 ]
@@ -46,7 +47,7 @@ function StepList({ steps }: { steps: { num: string; title: string; desc: string
         <div key={step.num}
           className={`px-6 py-5 ${i < steps.length - 1 ? 'border-b border-kb-border' : ''}`}>
           <div className="flex items-start gap-4">
-            <span className="text-[18px] font-bold flex-shrink-0 w-8" style={{ color: '#0D5C47' }}>
+            <span className="text-[18px] font-bold flex-shrink-0 w-8" style={{ color: KB_PRIMARY }}>
               {step.num}
             </span>
             <div>
@@ -96,7 +97,7 @@ export default function FirstVisitPage() {
           <button key={tab} onClick={() => setMainTab(tab)}
             className={`px-6 py-3 text-[14px] whitespace-nowrap transition-colors
               ${mainTab === tab ? 'border-b-2 font-bold -mb-px' : 'text-kb-text-muted hover:text-kb-text'}`}
-            style={mainTab === tab ? { borderColor: '#0D5C47', color: '#0D5C47' } : {}}>
+            style={mainTab === tab ? { borderColor: KB_PRIMARY, color: KB_PRIMARY } : {}}>
             {tab}
           </button>
         ))}
@@ -105,7 +106,7 @@ export default function FirstVisitPage() {
       {/* ── 인터넷뱅킹 이용안내 ── */}
       {mainTab === '인터넷뱅킹 이용안내' && (
         <div className="space-y-6">
-          <div className="bg-[#F0FAF7] border border-kb-border rounded-xl px-6 py-4 text-[14px] text-kb-text-body space-y-1.5">
+          <div className="bg-kb-primary-bg border border-kb-border rounded-xl px-6 py-4 text-[14px] text-kb-text-body space-y-1.5">
             <p>· 인터넷뱅킹은 은행이 정한 인증서를 발급받아야 이용이 가능합니다.</p>
             <p>· 이미 다른 은행에서 발급받은 인증서가 있다면 [타행인증서등록]을 통해 이용하실 수 있습니다.</p>
             <p>· 만 14세 미만 고객은 온라인 가입이 제한되며, 가까운 영업점을 방문해 주시기 바랍니다.</p>
@@ -114,12 +115,12 @@ export default function FirstVisitPage() {
           <div className="flex gap-3 pt-2">
             <Link href="/cert/fin-cert-issue"
               className="px-6 py-2.5 text-[14px] font-bold text-white rounded-lg transition-opacity hover:opacity-85"
-              style={{ backgroundColor: '#0D5C47' }}>
+              style={{ backgroundColor: KB_PRIMARY }}>
               인증서 발급하기
             </Link>
             <Link href="/login"
-              className="px-6 py-2.5 text-[14px] font-semibold rounded-lg border-2 transition-colors hover:bg-[#F0FAF7]"
-              style={{ borderColor: '#0D5C47', color: '#0D5C47' }}>
+              className="px-6 py-2.5 text-[14px] font-semibold rounded-lg border-2 transition-colors hover:bg-kb-primary-bg"
+              style={{ borderColor: KB_PRIMARY, color: KB_PRIMARY }}>
               로그인하기
             </Link>
           </div>
@@ -135,7 +136,7 @@ export default function FirstVisitPage() {
               <button key={tab} onClick={() => setCertSubTab(tab)}
                 className={`px-4 py-2.5 text-[13px] whitespace-nowrap transition-colors
                   ${certSubTab === tab ? 'border-b-2 font-bold -mb-px' : 'text-kb-text-muted hover:text-kb-text'}`}
-                style={certSubTab === tab ? { borderColor: '#0D5C47', color: '#0D5C47' } : {}}>
+                style={certSubTab === tab ? { borderColor: KB_PRIMARY, color: KB_PRIMARY } : {}}>
                 ▶ {tab}
               </button>
             ))}
@@ -146,12 +147,12 @@ export default function FirstVisitPage() {
           <div className="flex gap-3 pt-2">
             <Link href="/cert/fin-cert-issue"
               className="px-6 py-2.5 text-[14px] font-bold text-white rounded-lg transition-opacity hover:opacity-85"
-              style={{ backgroundColor: '#0D5C47' }}>
+              style={{ backgroundColor: KB_PRIMARY }}>
               개인용인증서발급 바로가기
             </Link>
             <button onClick={() => setMainTab('타인증서 등록안내')}
-              className="px-6 py-2.5 text-[14px] font-semibold rounded-lg border-2 transition-colors hover:bg-[#F0FAF7]"
-              style={{ borderColor: '#0D5C47', color: '#0D5C47' }}>
+              className="px-6 py-2.5 text-[14px] font-semibold rounded-lg border-2 transition-colors hover:bg-kb-primary-bg"
+              style={{ borderColor: KB_PRIMARY, color: KB_PRIMARY }}>
               타인증서 등록안내
             </button>
           </div>
@@ -163,7 +164,7 @@ export default function FirstVisitPage() {
         <div className="space-y-5">
           {/* 인증서 종류 안내 */}
           <div className="border border-kb-border rounded-xl overflow-hidden">
-            <div className="px-6 py-3 font-semibold text-[14px] text-white" style={{ backgroundColor: '#0D5C47' }}>
+            <div className="px-6 py-3 font-semibold text-[14px] text-white" style={{ backgroundColor: KB_PRIMARY }}>
               등록 가능한 인증서 종류
             </div>
             <div className="divide-y divide-kb-border">
@@ -183,7 +184,7 @@ export default function FirstVisitPage() {
           <div className="flex gap-3 pt-2">
             <Link href="/cert/joint-cert-issue"
               className="px-6 py-2.5 text-[14px] font-bold text-white rounded-lg transition-opacity hover:opacity-85"
-              style={{ backgroundColor: '#0D5C47' }}>
+              style={{ backgroundColor: KB_PRIMARY }}>
               타행/타기관 인증서등록 바로가기
             </Link>
           </div>

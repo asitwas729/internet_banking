@@ -17,7 +17,11 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -28,6 +32,7 @@ public class TransactionService {
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
     private final Clock clock;
+    private final IdempotentTransactionSaver idempotentTransactionSaver;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
@@ -36,6 +41,13 @@ public class TransactionService {
             return transactionRepository.findByAccountIdAndTransactionAtBetween(accountId, startDate, endDate, pageable);
         }
         return transactionRepository.findByAccountId(accountId, pageable);
+    }
+
+    public Page<Transaction> findByCustomer(String customerId, Pageable pageable) {
+        List<Long> accountIds = accountRepository.findByCustomerId(customerId)
+                .stream().map(a -> a.getAccountId()).toList();
+        if (accountIds.isEmpty()) return Page.empty(pageable);
+        return transactionRepository.findByAccountIdIn(accountIds, pageable);
     }
 
     public Transaction findById(Long id) {
@@ -104,10 +116,20 @@ public class TransactionService {
     public Transaction transfer(Long fromAccountId, Long toAccountId, String toAccountNo,
                                 BigDecimal amount, TransferType transferType,
                                 String counterpartyBankCode, String counterpartyBankName,
-                                String counterpartyName, TransactionChannel channelType, String transactionMemo) {
+                                String counterpartyName, TransactionChannel channelType, String transactionMemo,
+                                String idempotencyKey) {
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            Optional<Transaction> existing = transactionRepository
+                    .findByIdempotencyKeyAndAccountId(idempotencyKey, fromAccountId);
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+        }
         TransferType resolvedType = transferType != null ? transferType : TransferType.INTERNAL;
         if (resolvedType == TransferType.INTERNAL && toAccountId == null) {
-            throw new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND);
+            toAccountId = accountRepository.findByAccountNumber(toAccountNo)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND))
+                    .getAccountId();
         }
 
         Account source;
@@ -129,12 +151,15 @@ public class TransactionService {
             }
         }
 
+        validateDailyTransferLimit(source, amount);
+
         BigDecimal before = source.getBalance();
         source.withdraw(amount, clock);
         OffsetDateTime now = OffsetDateTime.now(clock);
 
-        Transaction outTx = transactionRepository.save(Transaction.builder()
+        Transaction built = Transaction.builder()
                 .transactionNumber(generateTxnNumber("TRF"))
+                .idempotencyKey(idempotencyKey != null && !idempotencyKey.isBlank() ? idempotencyKey : null)
                 .accountId(fromAccountId)
                 .transactionType(TransactionType.TRANSFER)
                 .directionType(DirectionType.OUT)
@@ -154,7 +179,9 @@ public class TransactionService {
                 .transferRequestedAt(now)
                 .transferCompletedAt(now)
                 .transactionMemo(transactionMemo)
-                .build());
+                .build();
+
+        Transaction outTx = idempotentTransactionSaver.saveOrFetch(built, idempotencyKey, fromAccountId);
 
         if (resolvedType == TransferType.INTERNAL) {
             BigDecimal targetBefore = target.getBalance();
@@ -210,6 +237,10 @@ public class TransactionService {
         if (original.getStatus() == TransactionStatus.CANCELED) {
             throw new BusinessException(ErrorCode.ALREADY_CANCELED);
         }
+        if (original.getTransactionType() != TransactionType.WITHDRAW
+                && original.getTransactionType() != TransactionType.TRANSFER) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "출금 또는 이체 거래만 취소할 수 있습니다.");
+        }
 
         Account account = getActiveAccountForUpdate(original.getAccountId());
         BigDecimal before = account.getBalance();
@@ -242,6 +273,33 @@ public class TransactionService {
                 .build());
     }
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    private void validateDailyTransferLimit(Account source, BigDecimal amount) {
+        if (source.getDailyWithdrawLimit() == null && source.getDailyWithdrawCountLimit() == null) {
+            return;
+        }
+        LocalDate koreaToday = LocalDate.now(clock.withZone(KST));
+        OffsetDateTime startOfDay = koreaToday.atStartOfDay(KST).toOffsetDateTime();
+        OffsetDateTime endOfDay = koreaToday.plusDays(1).atStartOfDay(KST).toOffsetDateTime();
+
+        if (source.getDailyWithdrawLimit() != null) {
+            BigDecimal todayTotal = transactionRepository.sumAmountByAccountIdAndDirectionTypeAndTransactionAtBetween(
+                    source.getAccountId(), DirectionType.OUT, startOfDay, endOfDay);
+            if (todayTotal.add(amount).compareTo(source.getDailyWithdrawLimit()) > 0) {
+                throw new BusinessException(ErrorCode.DAILY_TRANSFER_AMOUNT_EXCEEDED);
+            }
+        }
+
+        if (source.getDailyWithdrawCountLimit() != null) {
+            long todayCount = transactionRepository.countByAccountIdAndDirectionTypeAndTransactionAtBetween(
+                    source.getAccountId(), DirectionType.OUT, startOfDay, endOfDay);
+            if (todayCount >= source.getDailyWithdrawCountLimit()) {
+                throw new BusinessException(ErrorCode.DAILY_TRANSFER_COUNT_EXCEEDED);
+            }
+        }
+    }
+
     private Account getActiveAccountForUpdate(Long accountId) {
         Account account = accountRepository.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
@@ -260,6 +318,6 @@ public class TransactionService {
 
     private String generateTxnNumber(String prefix) {
         return prefix + "-" + LocalDate.now(clock).format(DATE_FMT) + "-"
-                + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+                + UUID.randomUUID().toString().replace("-", "").toUpperCase();
     }
 }

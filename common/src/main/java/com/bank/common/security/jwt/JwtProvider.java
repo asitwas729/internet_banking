@@ -27,6 +27,7 @@ public class JwtProvider {
     private static final String CLAIM_TOKEN_TYPE = "type";
     private static final String CLAIM_BRANCH     = "branch";
     private static final String CLAIM_GRADE      = "grade";
+    private static final String CLAIM_EMPLOYEE_ID = "empId";
 
     private final SecretKey key;
     private final long accessTokenValidity;
@@ -42,15 +43,24 @@ public class JwtProvider {
         return generateAccessToken(customerId, email, roles, null, null);
     }
 
-    public String generateAccessToken(Long customerId, String email, List<String> roles, String branch, String grade) {
+    /** 직원 로그인 시 지점(branch)·직급(grade) claim 포함 버전. */
+    public String generateAccessToken(Long customerId, String email, List<String> roles,
+                                      String branch, String grade) {
+        return generateAccessToken(customerId, email, roles, branch, grade, null);
+    }
+
+    /** 직원 로그인 시 지점·직급 + employee_id claim 포함 버전. employeeId 는 직원만 채운다. */
+    public String generateAccessToken(Long customerId, String email, List<String> roles,
+                                      String branch, String grade, Long employeeId) {
         long now = System.currentTimeMillis();
         var builder = Jwts.builder()
                 .subject(String.valueOf(customerId))
                 .claim(CLAIM_EMAIL, email)
                 .claim(CLAIM_ROLES, roles)
                 .claim(CLAIM_TOKEN_TYPE, TokenType.ACCESS.name());
-        if (branch != null) builder.claim(CLAIM_BRANCH, branch);
-        if (grade  != null) builder.claim(CLAIM_GRADE,  grade);
+        if (branch != null)     builder.claim(CLAIM_BRANCH, branch);
+        if (grade  != null)     builder.claim(CLAIM_GRADE,  grade);
+        if (employeeId != null) builder.claim(CLAIM_EMPLOYEE_ID, employeeId);
         return builder
                 .issuedAt(new Date(now))
                 .expiration(new Date(now + accessTokenValidity))
@@ -71,14 +81,22 @@ public class JwtProvider {
     }
 
     /**
-     * 토큰을 파싱해 클레임을 반환한다. 만료·서명 오류 시 JwtException 을 던진다.
+     * 토큰을 파싱해 클레임을 반환한다.
+     * 만료 시 BusinessException(TOKEN_EXPIRED), 그 외 서명·형식 오류 시 BusinessException(TOKEN_INVALID) 을 던진다.
      */
     public JwtClaims parseClaims(String token) {
-        Claims claims = Jwts.parser()
-                .verifyWith(key)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
+        Claims claims;
+        try {
+            claims = Jwts.parser()
+                    .verifyWith(key)
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+        } catch (ExpiredJwtException e) {
+            throw new BusinessException(CommonErrorCode.TOKEN_EXPIRED);
+        } catch (JwtException | IllegalArgumentException e) {
+            throw new BusinessException(CommonErrorCode.TOKEN_INVALID);
+        }
 
         Long customerId = Long.parseLong(claims.getSubject());
         String email    = claims.get(CLAIM_EMAIL, String.class);
@@ -90,7 +108,12 @@ public class JwtProvider {
         String branch = claims.get(CLAIM_BRANCH, String.class);
         String grade  = claims.get(CLAIM_GRADE,  String.class);
 
-        return new JwtClaims(customerId, email, roles != null ? roles : List.of(), tokenType, branch, grade);
+        // JSON 숫자 claim 은 Integer/Long 어느 쪽으로도 역직렬화될 수 있어 Number 로 안전 변환한다.
+        Number empId = claims.get(CLAIM_EMPLOYEE_ID, Number.class);
+        Long employeeId = empId != null ? empId.longValue() : null;
+
+        return new JwtClaims(customerId, email, roles != null ? roles : List.of(),
+                tokenType, branch, grade, employeeId);
     }
 
     /**

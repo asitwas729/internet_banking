@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import AdminSidebar from '@/components/admin/AdminSidebar'
@@ -27,7 +26,7 @@ export default function AdminDocumentsPage() {
     setLoading(true); setErr('')
     try {
       const { data: res } = await loanApplicationApi.getDocuments(parseInt(applId))
-      setDocs(res.data ?? [])
+      setDocs(res.data?.items ?? [])
     } catch { fail('서류 목록을 불러오지 못했습니다.') }
     finally { setLoading(false) }
   }

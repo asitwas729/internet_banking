@@ -6,11 +6,11 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -97,12 +97,21 @@ public abstract class AbstractLoanIntegrationTest {
         r.add("spring.datasource.password", POSTGRES::getPassword);
         r.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
 
+        // common_db 는 같은 테스트 컨테이너를 공유한다. common Flyway 는 전용 이력 테이블을 쓰므로
+        // loan Flyway 와 충돌하지 않는다(CommonDataSourceConfig 참고).
+        r.add("common.datasource.url",      POSTGRES::getJdbcUrl);
+        r.add("common.datasource.username", POSTGRES::getUsername);
+        r.add("common.datasource.password", POSTGRES::getPassword);
+
         r.add("spring.data.redis.host", REDIS::getHost);
         r.add("spring.data.redis.port", () -> REDIS.getFirstMappedPort());
 
         r.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
 
         r.add("loan.review.bias-check.enabled", () -> "false");
+        // 가심사→ceval→DSR 자동 트리거(비동기)는 테스트의 수동 ceval/DSR 호출과 같은 appl_id 에
+        // 충돌(unique 위반)하므로 통합테스트에서는 끈다. 각 플로우는 값을 직접 통제한다.
+        r.add("loan.auto-trigger.enabled", () -> "false");
         r.add("doc-agent.base-url", () -> "http://localhost:" + DOC_AGENT_MOCK.port());
         r.add("auto-review.base-url", () -> "http://localhost:" + AUTO_REVIEW_MOCK.port());
         r.add("advisory.service.base-url", () -> "http://localhost:" + ADVISORY_MOCK.port());
@@ -116,11 +125,27 @@ public abstract class AbstractLoanIntegrationTest {
 
     @BeforeAll
     void initTestAuth() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(wac)
+        mockMvc = buildAuthMockMvc();
+    }
+
+    @BeforeEach
+    void resetTestAuth() {
+        mockMvc = buildAuthMockMvc();
+    }
+
+    private MockMvc buildAuthMockMvc() {
+        // GatewayHeaderAuthFilter 가 X-User-Id / X-User-Role 헤더를 읽어 SecurityContext 를 설정한다.
+        String roles = "ROLE_STAFF,ROLE_OPS,ROLE_SENIOR_REVIEWER,ROLE_INTERNAL,"
+                + "ROLE_TELLER,ROLE_DEPUTY_MANAGER,ROLE_BRANCH_MANAGER,"
+                + "ROLE_HQ_REVIEWER,ROLE_COMPLIANCE,ROLE_ADMIN";
+        return MockMvcBuilders.webAppContextSetup(wac)
                 .apply(SecurityMockMvcConfigurers.springSecurity())
                 .defaultRequest(MockMvcRequestBuilders.get("/")
-                        .with(SecurityMockMvcRequestPostProcessors.user("test@bank.com")
-                                .roles("STAFF", "OPS", "SENIOR_REVIEWER", "INTERNAL")))
+                        .with(request -> {
+                            request.addHeader("X-User-Id", "1");
+                            request.addHeader("X-User-Role", roles);
+                            return request;
+                        }))
                 .build();
     }
 

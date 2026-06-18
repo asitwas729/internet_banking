@@ -1,4 +1,5 @@
 'use client'
+import { KB_MINT } from '@/lib/theme'
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -11,7 +12,11 @@ type Slide = {
 }
 
 function productToSlide(p: DepositProduct, category: string, badge: string, tab: string): Slide {
-  const rate = p.baseInterestRate != null ? `연 ${p.baseInterestRate}%` : '-'
+  const rate = p.bestRate != null
+    ? `최고 연 ${p.bestRate}%`
+    : p.baseInterestRate != null
+      ? `기본 연 ${p.baseInterestRate}%`
+      : '-'
   const period = p.minPeriodMonth != null
     ? (p.maxPeriodMonth && p.maxPeriodMonth !== p.minPeriodMonth
         ? `${p.minPeriodMonth}~${p.maxPeriodMonth}개월`
@@ -146,7 +151,7 @@ export default function ProductShowcase() {
 
         {/* 헤더 */}
         <div className="mb-3">
-          <p className="text-[11px] font-semibold tracking-widest uppercase mb-0.5" style={{ color: '#5BC9A8' }}>Featured Products</p>
+          <p className="text-[11px] font-semibold tracking-widest uppercase mb-0.5" style={{ color: KB_MINT }}>Featured Products</p>
           <h2 className="text-[22px] font-bold text-kb-text">AXful Bank 대표상품</h2>
         </div>
 
@@ -228,10 +233,8 @@ export default function ProductShowcase() {
                   </svg>
                 </div>
                 <div>
-                  <p className="text-[22px] font-bold text-kb-text leading-none">
-                    {current.rate}
-                    <span className="text-[11px] text-kb-text-muted font-normal ml-2">{current.rateNote}</span>
-                  </p>
+                  <p className="text-[22px] font-bold text-kb-text leading-none">{current.rate}</p>
+                  <p className="text-[11px] text-kb-text-muted mt-1">{current.rateNote}</p>
                 </div>
               </div>
             </div>

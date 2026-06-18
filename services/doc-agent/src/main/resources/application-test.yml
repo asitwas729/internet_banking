@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:doc_agent_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  flyway:
+    enabled: false
+  cloud:
+    vault:
+      enabled: false
+  kafka:
+    bootstrap-servers: localhost:9092
+
+# 테스트 전용 더미 AES-256 키(32바이트 Base64) — CryptoService 빈 초기화용
+crypto:
+  key-base64: bG9hbi1zZXJ2aWNlLWRldi1hZXMta2V5LTMyYnl0ZXM=
+
+doc-agent:
+  storage:
+    endpoint: http://localhost:9000
+    access-key: minioadmin
+    secret-key: minioadmin
+  inference:
+    base-url: http://localhost:8090
+  ollama:
+    base-url: http://localhost:11434
+  identity-verify:
+    driver-license:
+      enabled: false

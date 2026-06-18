@@ -1,10 +1,13 @@
 'use client'
+import { KB_PRIMARY,KB_PRIMARY_BG,KB_PRIMARY_BORDER,KB_PRIMARY_SURFACE } from '@/lib/theme'
 
 import Link from 'next/link'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import CartModal from '@/components/products/CartModal'
 import DepositSidebar from '@/components/products/DepositSidebar'
-import { fetchDepositProducts, getDepositSlugByProductId, toDepositProductCard } from '@/lib/deposit-api'
+import AutoBreadcrumb from '@/components/layout/AutoBreadcrumb'
+import { fetchDepositProducts, toDepositProductCard } from '@/lib/deposit-api'
 
 type Product = {
   id: string
@@ -21,7 +24,7 @@ const DEPOSIT_PRODUCTS: Product[] = [
   {
     id: 'axful-regular',
     name: 'AXful 정기예금',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: 'Digital AXful의 대표 정기예금',
     period: '1~36개월',
     rate: '연 2.4%~2.9%',
@@ -48,7 +51,7 @@ const DEPOSIT_PRODUCTS: Product[] = [
   {
     id: 'axful-youth',
     name: 'AXful 청년도약계좌',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '청년의 자산형성을 응원합니다',
     period: '60개월',
     rate: '연 3.5%~6.0%',
@@ -61,7 +64,7 @@ const FREE_SAVINGS_PRODUCTS: Product[] = [
   {
     id: 'axful-free',
     name: 'AXful 내맘대로적금',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '누구나 쉽게 자유롭게 DIY',
     period: '36개월 기준',
     rate: '연 2.95%~3.55%',
@@ -70,7 +73,7 @@ const FREE_SAVINGS_PRODUCTS: Product[] = [
   {
     id: 'axful-dollar',
     name: 'AXful 달러자적금',
-    channel: '스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '달러 가치상승 응원하는 두배이율',
     period: '6개월 기준',
     rate: '연 1%~7.2%',
@@ -80,7 +83,7 @@ const FREE_SAVINGS_PRODUCTS: Product[] = [
   {
     id: 'axful-green',
     name: 'AXful 맑은하늘적금',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '맑은하늘 인증코드 금리도 Up',
     period: '36개월 기준',
     rate: '연 2.85%~3.85%',
@@ -89,7 +92,7 @@ const FREE_SAVINGS_PRODUCTS: Product[] = [
   {
     id: 'axful-star-savings',
     name: 'AXful 특★한 적금',
-    channel: '스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '고객 모두의 높은 수익을 위한 특별한 준비',
     period: '1개월 기준',
     rate: '연 2%~6%',
@@ -102,7 +105,7 @@ const REGULAR_SAVINGS_PRODUCTS: Product[] = [
   {
     id: 'axful-soldier',
     name: 'AXful 장병내일준비적금',
-    channel: '스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '국군장병 미래대비 앞날준비',
     period: '24개월 기준',
     rate: '연 5%~10.5%',
@@ -111,7 +114,7 @@ const REGULAR_SAVINGS_PRODUCTS: Product[] = [
   {
     id: 'axful-work',
     name: 'AXful 직장인우대적금',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '급여이체 고객 우대금리 제공',
     period: '12~36개월',
     rate: '연 3.2%~4.5%',
@@ -120,7 +123,7 @@ const REGULAR_SAVINGS_PRODUCTS: Product[] = [
   {
     id: 'axful-dream',
     name: 'AXful 꿈적금',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '목표금액 설정으로 꿈을 향해 꾸준히',
     period: '12~36개월',
     rate: '연 3.0%~4.2%',
@@ -129,7 +132,7 @@ const REGULAR_SAVINGS_PRODUCTS: Product[] = [
   {
     id: 'axful-together',
     name: 'AXful 함께적금',
-    channel: '스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '가족·연인과 함께 모으는 공동 적금',
     period: '6~24개월',
     rate: '연 2.8%~4.0%',
@@ -157,14 +160,14 @@ const CHECKING_PRODUCTS: Product[] = [
   {
     id: 'axful-living',
     name: 'AXful 생계비계좌',
-    channel: '스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '생계 유지에 필요한 자금을 최대 250만원까지 보호하는 압류방지 전용통장',
     isNew: true,
   },
   {
     id: 'axful-gs',
     name: 'AXful GS Pay통장',
-    channel: '스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: 'GS25와의 만남으로 더 풍성해진 혜택',
     isNew: true,
   },
@@ -178,32 +181,33 @@ const CHECKING_PRODUCTS: Product[] = [
   {
     id: 'axful-moim',
     name: 'AXful 모임금고',
-    channel: '스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '고인 여유자금을 연 2.0%(최대 1천만원)로 불리는',
   },
   {
     id: 'axful-star-account',
     name: 'AXful 스타통장',
-    channel: '스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: 'Digital AXful의 대표 통장',
   },
   {
     id: 'axful-wallet',
     name: 'AXful 지갑통장',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '일상의 모든 지출을 한 곳에서 관리',
     isNew: true,
   },
   {
     id: 'axful-free-account',
     name: 'AXful 자유입출금통장',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '언제든 자유롭게 입출금 가능한 기본 통장',
+    canApply: true,
   },
   {
     id: 'axful-youth-account',
     name: 'AXful 청년우대통장',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     desc: '만 19~34세 청년을 위한 우대금리 제공',
     canApply: true,
   },
@@ -213,7 +217,7 @@ const HOUSING_PRODUCTS: Product[] = [
   {
     id: 'housing-savings',
     name: '주택청약종합저축',
-    channel: '인터넷·스타뱅킹',
+    channel: '인터넷뱅킹',
     period: '24개월 기준',
     rate: '연 3.1%',
     canApply: true,
@@ -221,7 +225,7 @@ const HOUSING_PRODUCTS: Product[] = [
   {
     id: 'youth-housing',
     name: '청년 주택드림 청약통장',
-    channel: '스타뱅킹',
+    channel: '인터넷뱅킹',
     period: '24개월 기준',
     rate: '연 3.1%~4.5%',
     canApply: true,
@@ -231,22 +235,40 @@ const HOUSING_PRODUCTS: Product[] = [
 type Tab = '예금' | '정기적금' | '자유적금' | '입출금자유' | '주택청약'
 const TABS: Tab[] = ['예금', '정기적금', '자유적금', '입출금자유', '주택청약']
 
+const TAB_ALIASES: Record<string, Tab> = {
+  deposit: '예금',
+  'regular-savings': '정기적금',
+  regular: '정기적금',
+  'free-savings': '자유적금',
+  free: '자유적금',
+  checking: '입출금자유',
+  account: '입출금자유',
+  demand: '입출금자유',
+  subscription: '주택청약',
+  housing: '주택청약',
+}
+
+function resolveTabParam(raw: string | null): Tab | null {
+  if (!raw) return null
+  const decoded = decodeURIComponent(raw).trim()
+  if ((TABS as readonly string[]).includes(decoded)) return decoded as Tab
+  return TAB_ALIASES[decoded.toLowerCase()] ?? null
+}
+
 const DEPOSIT_PRODUCT_TYPES = ['전체', '정기예금', '지수연동예금', '시장성예금']
-const JOIN_METHODS = ['전체', '인터넷뱅킹', '스타뱅킹', 'AXful Next', '영업점']
+const JOIN_METHODS = ['전체', '인터넷뱅킹', 'AXful Next', '영업점']
 const JOIN_PERIODS = ['전체', '3개월 미만', '3-6개월 미만', '6-12개월 미만', '12-24개월 미만', '24개월 이상']
 
-export default function DepositListPage() {
+function DepositListPageInner() {
+  const searchParams = useSearchParams()
   const [tab, setTab] = useState<Tab>('예금')
   const [apiProductsMap, setApiProductsMap] = useState<Partial<Record<Tab, Product[]>>>({})
 
   // URL ?tab= 파라미터로 초기 탭 설정 (클라이언트 전용)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const raw = params.get('tab') as Tab | null
-    if (raw && (TABS as readonly string[]).includes(raw)) {
-      setTab(raw)
-    }
-  }, [])
+    const nextTab = resolveTabParam(searchParams.get('tab'))
+    if (nextTab) setTab(nextTab)
+  }, [searchParams])
 
   useEffect(() => {
     let cancelled = false
@@ -265,11 +287,10 @@ export default function DepositListPage() {
 
         products.forEach(product => {
           const card = toDepositProductCard(product)
-          const slug = getDepositSlugByProductId(product.productId)
           if (product.productType === 'SUBSCRIPTION') {
             next['주택청약']?.push(card)
           } else if (product.productType === 'SAVINGS') {
-            if (['axful-soldier', 'axful-work', 'axful-dream', 'axful-together'].includes(slug)) {
+            if (product.savingType === 'REGULAR') {
               next['정기적금']?.push(card)
             } else {
               next['자유적금']?.push(card)
@@ -332,27 +353,23 @@ export default function DepositListPage() {
         {/* 본문 */}
         <main className="flex-1 pl-8 pt-4 pb-12">
           {/* 브레드크럼 */}
-          <div className="flex justify-end mb-2 text-[12px] text-kb-text-muted gap-1 items-center">
-            <span>개인뱅킹</span><span>&gt;</span>
-            <span>금융상품</span><span>&gt;</span>
-            <span>예금</span><span>&gt;</span>
-            <span className="font-semibold text-kb-text">예금 상품/가입</span>
-            <span>&gt;</span>
-            <Link href="#" className="font-medium hover:underline" style={{ color: '#0D5C47' }}>도움말</Link>
-          </div>
+          <AutoBreadcrumb
+            className="flex justify-end items-center mb-2 text-[12px] text-kb-text-muted gap-1"
+            trailing={<Link href="#" className="font-medium hover:underline" style={{ color: KB_PRIMARY }}>도움말</Link>}
+          />
 
           <h1 className="text-[22px] font-bold text-kb-text mb-5">예금 상품/가입</h1>
 
           {/* 탭 */}
-          <div className="flex border-b mb-5" style={{ borderColor: '#E2F5EF' }}>
+          <div className="flex border-b mb-5" style={{ borderColor: KB_PRIMARY_BORDER }}>
             {TABS.map(t => (
               <button
                 key={t}
                 onClick={() => handleTabChange(t)}
                 className="px-8 py-3 text-[14px] font-medium transition-colors border-b-2 -mb-px"
                 style={tab === t
-                  ? { borderColor: '#0D5C47', color: '#0D5C47', fontWeight: 700, backgroundColor: 'white' }
-                  : { borderColor: 'transparent', color: '#9CA3AF', backgroundColor: '#F8FFFE' }}
+                  ? { borderColor: KB_PRIMARY, color: KB_PRIMARY, fontWeight: 700, backgroundColor: 'white' }
+                  : { borderColor: 'transparent', color: '#9CA3AF', backgroundColor: KB_PRIMARY_SURFACE }}
               >
                 {t}
               </button>
@@ -360,7 +377,7 @@ export default function DepositListPage() {
           </div>
 
           {/* 필터 */}
-          <div className="rounded-xl p-5 mb-5" style={{ border: '1px solid #E2F5EF', backgroundColor: '#F8FFFE' }}>
+          <div className="rounded-xl p-5 mb-5" style={{ border: '1px solid #E2F5EF', backgroundColor: KB_PRIMARY_SURFACE }}>
             <div className="grid grid-cols-[100px_1fr] gap-y-3 text-[13px] items-center">
               <span className="font-semibold text-kb-text">• 상품명</span>
               <input
@@ -378,7 +395,7 @@ export default function DepositListPage() {
                     {DEPOSIT_PRODUCT_TYPES.map(v => (
                       <label key={v} className="flex items-center gap-1.5 cursor-pointer text-kb-text-body">
                         <input type="radio" name="productType" checked={productType === v}
-                          onChange={() => setProductType(v)} style={{ accentColor: '#0D5C47' }} />
+                          onChange={() => setProductType(v)} style={{ accentColor: KB_PRIMARY }} />
                         {v}
                       </label>
                     ))}
@@ -391,7 +408,7 @@ export default function DepositListPage() {
                 {JOIN_METHODS.map(v => (
                   <label key={v} className="flex items-center gap-1.5 cursor-pointer text-kb-text-body">
                     <input type="radio" name="joinMethod" checked={joinMethod === v}
-                      onChange={() => setJoinMethod(v)} style={{ accentColor: '#0D5C47' }} />
+                      onChange={() => setJoinMethod(v)} style={{ accentColor: KB_PRIMARY }} />
                     {v}
                   </label>
                 ))}
@@ -404,7 +421,7 @@ export default function DepositListPage() {
                     {JOIN_PERIODS.map(v => (
                       <label key={v} className="flex items-center gap-1.5 cursor-pointer text-kb-text-body">
                         <input type="radio" name="joinPeriod" checked={joinPeriod === v}
-                          onChange={() => setJoinPeriod(v)} style={{ accentColor: '#0D5C47' }} />
+                          onChange={() => setJoinPeriod(v)} style={{ accentColor: KB_PRIMARY }} />
                         {v}
                       </label>
                     ))}
@@ -414,7 +431,7 @@ export default function DepositListPage() {
             </div>
             <div className="flex justify-center mt-4">
               <button className="px-16 py-2.5 text-[14px] font-bold text-white rounded-xl hover:opacity-85 transition-opacity"
-                style={{ backgroundColor: '#0D5C47' }}>
+                style={{ backgroundColor: KB_PRIMARY }}>
                 조회
               </button>
             </div>
@@ -423,9 +440,9 @@ export default function DepositListPage() {
           {/* 목록 헤더 */}
           <div className="flex justify-between items-center mb-2">
             <p className="text-[13px] text-kb-text">
-              상품목록 <span className="font-bold" style={{ color: '#0D5C47' }}>{products.length}</span>건
+              상품목록 <span className="font-bold" style={{ color: KB_PRIMARY }}>{products.length}</span>건
             </p>
-            <select className="border rounded-lg px-2 py-1 text-[12px] outline-none" style={{ borderColor: '#E2F5EF' }}>
+            <select className="border rounded-lg px-2 py-1 text-[12px] outline-none" style={{ borderColor: KB_PRIMARY_BORDER }}>
               <option>금리순</option>
               <option>기간순</option>
               <option>상품명순</option>
@@ -436,18 +453,18 @@ export default function DepositListPage() {
           <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #E2F5EF' }}>
             {products.map((product, idx) => (
               <div key={product.id}
-                className="py-5 px-5 hover:bg-[#F8FFFE] transition-colors"
+                className="py-5 px-5 hover:bg-kb-primary-surface transition-colors"
                 style={{ borderBottom: idx < products.length - 1 ? '1px solid #E2F5EF' : 'none' }}>
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-[11px] rounded px-1.5 py-0.5 text-kb-text-muted"
-                        style={{ border: '1px solid #E2F5EF', backgroundColor: '#F0FAF7' }}>
+                        style={{ border: '1px solid #E2F5EF', backgroundColor: KB_PRIMARY_BG }}>
                         {product.channel}
                       </span>
                       {product.isNew && (
                         <span className="text-[11px] rounded px-1.5 py-0.5 font-bold text-white"
-                          style={{ backgroundColor: '#5BC9A8' }}>NEW</span>
+                          style={{ backgroundColor: KB_PRIMARY }}>NEW</span>
                       )}
                     </div>
                     <Link href={`/products/deposit/${product.id}`}
@@ -460,26 +477,26 @@ export default function DepositListPage() {
                     {(product.period || product.rate) && (
                       <p className="text-[13px] mt-1">
                         {product.period && <span className="text-kb-text-muted">{product.period}, </span>}
-                        {product.rate && <span className="font-bold" style={{ color: '#0D5C47' }}>{product.rate}</span>}
+                        {product.rate && <span className="font-bold" style={{ color: KB_PRIMARY }}>{product.rate}</span>}
                       </p>
                     )}
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       onClick={() => setCartProduct(product.name)}
-                      className="border rounded-lg px-3 py-1.5 text-[13px] hover:bg-[#F0FAF7] transition-colors"
-                      style={{ borderColor: '#E2F5EF' }}
+                      className="border rounded-lg px-3 py-1.5 text-[13px] hover:bg-kb-primary-bg transition-colors"
+                      style={{ borderColor: KB_PRIMARY_BORDER }}
                     >
                       🛒
                     </button>
-                    <button className="border rounded-lg px-4 py-1.5 text-[13px] font-medium hover:bg-[#F0FAF7] transition-colors"
-                      style={{ borderColor: '#5BC9A8', color: '#0D5C47' }}>
+                    <button className="border rounded-lg px-4 py-1.5 text-[13px] font-medium hover:bg-kb-primary-bg transition-colors"
+                      style={{ borderColor: KB_PRIMARY_BORDER, color: KB_PRIMARY }}>
                       비교하기
                     </button>
                     {product.canApply && (
                       <Link href={`/products/deposit/join/${product.id}`}
                         className="rounded-xl px-5 py-1.5 text-[13px] font-bold text-white hover:opacity-85 transition-opacity"
-                        style={{ backgroundColor: '#0D5C47' }}>
+                        style={{ backgroundColor: KB_PRIMARY }}>
                         가입하기
                       </Link>
                     )}
@@ -499,11 +516,15 @@ export default function DepositListPage() {
           {/* 페이지네이션 */}
           <div className="flex justify-center mt-8 gap-1">
             <button className="w-8 h-8 text-[13px] rounded-lg font-bold text-white"
-              style={{ backgroundColor: '#0D5C47' }}>1</button>
+              style={{ backgroundColor: KB_PRIMARY }}>1</button>
           </div>
         </main>
       </div>
     </div>
     </>
   )
+}
+
+export default function DepositListPage() {
+  return <Suspense><DepositListPageInner /></Suspense>
 }

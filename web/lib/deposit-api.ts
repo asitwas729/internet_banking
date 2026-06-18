@@ -26,17 +26,42 @@ depositApi.interceptors.request.use((config) => {
 export type DepositProductType = 'DEPOSIT' | 'SAVINGS' | 'SUBSCRIPTION'
 export type SavingType = 'REGULAR' | 'FREE'
 
+export type DepositProductTargetGroup = {
+  targetGroupId: number
+  targetGroupName: string
+  minAge?: number | null
+  maxAge?: number | null
+}
+
 export type DepositProduct = {
   productId: number
   productType: DepositProductType
   productName: string
   description?: string
-  baseInterestRate?: number | string
+  baseInterestRate?: number | string | null
+  bestRate?: number | string | null
   minJoinAmount?: number | string
   maxJoinAmount?: number | string
   minPeriodMonth?: number
   maxPeriodMonth?: number
   productStatus?: string
+  savingType?: SavingType
+  targetGroups?: DepositProductTargetGroup[]
+}
+
+export type DepositInterestRate = {
+  rateId: number
+  productId: number
+  rateType: 'BASE' | 'PREFERENTIAL'
+  minimumContractPeriod?: number | null
+  maximumContractPeriod?: number | null
+  minimumJoinAmount?: number | string | null
+  maximumJoinAmount?: number | string | null
+  rate: number | string
+  conditionDescription?: string | null
+  effectiveStartDate?: string
+  effectiveEndDate?: string | null
+  isActive?: boolean
 }
 
 export type DepositContract = {
@@ -64,6 +89,8 @@ export type DepositAccount = {
   accountAlias?: string
   balance: number | string
   totalPaidAmount?: number | string
+  isWithdrawable?: boolean
+  withdrawable?: boolean
   openedAt?: string
   maturityAt?: string
   accountStatus?: string
@@ -72,7 +99,10 @@ export type DepositAccount = {
 export type DepositViewAccount = Account & {
   apiAccountId?: number
   contractId?: number
+  rawAccountType?: DepositProductType
+  isWithdrawable?: boolean
   accountStatus?: string
+  savingType?: SavingType
 }
 
 export type DepositRecommendProduct = {
@@ -121,33 +151,11 @@ export type CreateDepositContractInput = {
   taxExempt?: boolean
 }
 
-const PRODUCT_ID_BY_SLUG: Record<string, number> = {
-  'axful-regular': 6,
-  'axful-super': 7,
-  regular: 8,
-  'axful-youth': 9,
-  'axful-free': 10,
-  'axful-dollar': 11,
-  'axful-green': 12,
-  'axful-soldier': 13,
-  'axful-star-savings': 14,
-  'housing-savings': 15,
-  'youth-housing': 16,
-  'axful-sok': 17,
-  election: 18,
-  'axful-living': 19,
-  'axful-gs': 20,
-  'monimo-daily': 21,
-  'axful-moim': 22,
-  'axful-star-account': 23,
-  'axful-wallet': 24,
-  'axful-free-account': 25,
-  'axful-youth-account': 26,
-  'axful-work': 9004,
-  'axful-dream': 9005,
-  'axful-together': 9006,
-}
+// 하드코딩 ID는 환경마다 시퀀스가 달라 오동작 유발 — resolveProductId에서 항상 API 조회
+const PRODUCT_ID_BY_SLUG: Record<string, number> = {}
 
+// PRODUCT_NAME_TO_SLUG 하드코딩 제거 — DB 상품명 변경 시 조용히 깨지는 문제 방지.
+// slug는 productId 기반(product-{id})으로 생성하고, 상세 페이지 라우팅은 productId를 직접 사용한다.
 const SLUG_BY_PRODUCT_ID = Object.fromEntries(
   Object.entries(PRODUCT_ID_BY_SLUG).map(([slug, productId]) => [productId, slug])
 ) as Record<number, string>
@@ -158,6 +166,12 @@ const CHECKING_PRODUCT_SLUGS = new Set([
   'axful-wallet',
   'axful-free-account',
   'axful-youth-account',
+  'axful-sok',
+  'monimo-daily',
+  // join/[id]/page.tsx CHECKING_IDS와 동기화
+  'axful-living',
+  'axful-gs',
+  'election',
 ])
 
 const SAVING_TYPE_BY_SLUG: Record<string, SavingType> = {
@@ -171,8 +185,18 @@ const SAVING_TYPE_BY_SLUG: Record<string, SavingType> = {
   'axful-together': 'REGULAR',
 }
 
+const LEGACY_CUSTOMER_ID_MAP: Record<string, string> = {
+  CUST001: '1',
+}
+
+export function normalizeDepositCustomerId(customerId?: string | number | null) {
+  const value = String(customerId ?? '').trim()
+  if (!value) return '1'
+  return LEGACY_CUSTOMER_ID_MAP[value] ?? value
+}
+
 function headers(customerId: string) {
-  return { 'X-Customer-Id': customerId }
+  return { 'X-Customer-Id': normalizeDepositCustomerId(customerId) }
 }
 
 function toNumber(value: number | string | undefined, fallback: number | undefined = 0) {
@@ -187,16 +211,16 @@ function toDateText(value?: string) {
 }
 
 export function getCurrentDepositCustomerId() {
-  if (typeof window === 'undefined') return 'CUST001'
+  if (typeof window === 'undefined') return '1'
 
   const direct = localStorage.getItem('customerId')
-  if (direct) return direct
+  if (direct) return normalizeDepositCustomerId(direct)
 
   try {
     const user = JSON.parse(localStorage.getItem('user') || '{}')
-    return user.customerId || user.customer_id || user.id || 'CUST001'
+    return normalizeDepositCustomerId(user.customerId || user.customer_id || user.id)
   } catch {
-    return 'CUST001'
+    return '1'
   }
 }
 
@@ -213,12 +237,19 @@ export async function fetchDepositProduct(productId: number) {
   return data
 }
 
+export async function fetchDepositInterestRates(productId: number) {
+  const { data } = await depositApi.get<DepositInterestRate[]>(`/products/${productId}/interest-rates`)
+  return data
+}
+
 export function getDepositProductIdBySlug(slug: string) {
   return PRODUCT_ID_BY_SLUG[slug]
 }
 
 export function getDepositSlugByProductId(productId: number) {
-  return SLUG_BY_PRODUCT_ID[productId] || `product-${productId}`
+  // 환경마다 ID 시퀀스가 다르므로 하드코딩 맵 대신 productId 기반 slug를 사용한다.
+  // 상세 페이지 라우팅이 필요하면 slug 대신 productId를 직접 쿼리파라미터로 전달할 것.
+  return SLUG_BY_PRODUCT_ID[productId] ?? `product-${productId}`
 }
 
 export function toDepositProductCard(product: DepositProduct) {
@@ -238,25 +269,29 @@ export function toDepositProductCard(product: DepositProduct) {
     desc: product.description,
     period,
     rate:
-      product.baseInterestRate !== undefined
-        ? `연 ${Number(product.baseInterestRate).toLocaleString('ko-KR')}%`
+      product.bestRate != null
+        ? `최고 연 ${Number(product.bestRate).toLocaleString('ko-KR')}%`
+        : product.baseInterestRate != null
+        ? `기본 연 ${Number(product.baseInterestRate).toLocaleString('ko-KR')}%`
         : undefined,
     canApply: product.productStatus ? product.productStatus === 'SELLING' : true,
   }
 }
 
 export async function fetchDepositContracts(customerId: string) {
+  const normalizedCustomerId = normalizeDepositCustomerId(customerId)
   const { data } = await depositApi.get<DepositContract[]>('/contracts', {
-    params: { customerId },
-    headers: headers(customerId),
+    params: { customerId: normalizedCustomerId },
+    headers: headers(normalizedCustomerId),
   })
   return data
 }
 
 export async function fetchDepositAccounts(customerId: string) {
+  const normalizedCustomerId = normalizeDepositCustomerId(customerId)
   const { data } = await depositApi.get<DepositAccount[]>('/accounts', {
-    params: { customerId },
-    headers: headers(customerId),
+    params: { customerId: normalizedCustomerId },
+    headers: headers(normalizedCustomerId),
   })
   return data
 }
@@ -269,10 +304,11 @@ export async function terminateDepositContract(contractId: number, reason = 'ONL
   return data
 }
 
-export async function fetchDepositRecommendAgent(customerId: string, periodMonth = 3) {
+export async function fetchDepositRecommendAgent(customerId: string, periodMonth = 3, birthYear?: number) {
+  const normalizedCustomerId = normalizeDepositCustomerId(customerId)
   const { data } = await depositApi.get<DepositRecommendResponse>('/products/recommend-agent', {
-    params: { customerId, periodMonth },
-    headers: headers(customerId),
+    params: { customerId: normalizedCustomerId, periodMonth, ...(birthYear != null && { birthYear }) },
+    headers: headers(normalizedCustomerId),
   })
   return data
 }
@@ -289,12 +325,13 @@ async function resolveProductId(slug: string, productName: string) {
 }
 
 export async function createDepositContract(customerId: string, input: CreateDepositContractInput) {
+  const normalizedCustomerId = normalizeDepositCustomerId(customerId)
   const productId = await resolveProductId(input.slug, input.productName)
   const joinAmount = input.amount > 0 ? input.amount : 1
   const contractPeriodMonth = input.periodMonth > 0 ? input.periodMonth : 1
 
   const payload = {
-    customerId,
+    customerId: normalizedCustomerId,
     productId,
     joinAmount,
     contractPeriodMonth,
@@ -309,7 +346,7 @@ export async function createDepositContract(customerId: string, input: CreateDep
   }
 
   const { data } = await depositApi.post<DepositContract>('/contracts', payload, {
-    headers: headers(customerId),
+    headers: headers(normalizedCustomerId),
   })
   return data
 }
@@ -319,12 +356,15 @@ function accountTypeLabel(account: DepositAccount, product?: DepositProduct): Ac
   if (account.accountType === 'SUBSCRIPTION') return '청약'
   if (product && CHECKING_PRODUCT_SLUGS.has(getDepositSlugByProductId(product.productId))) return '입출금'
   if (product?.productName?.includes('통장')) return '입출금'
+  if (account.accountAlias?.includes('통장')) return '입출금'
+  if (account.isWithdrawable ?? account.withdrawable) return '입출금'
   return '예금'
 }
 
 function fallbackName(account: DepositAccount) {
   if (account.accountType === 'SAVINGS') return '가입 적금'
   if (account.accountType === 'SUBSCRIPTION') return '가입 청약'
+  if (account.isWithdrawable ?? account.withdrawable) return '가입 통장'
   return '가입 예금'
 }
 
@@ -334,6 +374,8 @@ export type DepositTransaction = {
   transactionType: string
   directionType: 'IN' | 'OUT'
   amount: number | string
+  balanceAfter?: number | string
+  availableBalanceAfter?: number | string
   status: string
   transactionAt: string
   transactionSummary?: string
@@ -341,6 +383,41 @@ export type DepositTransaction = {
   counterpartyAccountNo?: string
   counterpartyBankName?: string
   counterpartyName?: string
+}
+
+export type ExecuteDepositTransferInput = {
+  fromAccountId: number
+  toAccountId?: number
+  toAccountNo: string
+  amount: number
+  transferType?: 'INTERNAL' | 'EXTERNAL' | 'AUTO' | 'SCHEDULED'
+  counterpartyBankCode?: string
+  counterpartyBankName?: string
+  counterpartyName?: string
+  transactionMemo?: string
+}
+
+export async function executeDepositTransfer(
+  customerId: string,
+  input: ExecuteDepositTransferInput
+): Promise<DepositTransaction> {
+  const { data } = await depositApi.post<DepositTransaction>(
+    '/transactions/transfer',
+    {
+      fromAccountId: input.fromAccountId,
+      toAccountId: input.toAccountId,
+      toAccountNo: input.toAccountNo,
+      amount: input.amount,
+      transferType: input.transferType ?? (input.toAccountId ? 'INTERNAL' : 'EXTERNAL'),
+      counterpartyBankCode: input.counterpartyBankCode,
+      counterpartyBankName: input.counterpartyBankName,
+      counterpartyName: input.counterpartyName,
+      channelType: 'INTERNET',
+      transactionMemo: input.transactionMemo ?? '인터넷 이체',
+    },
+    { headers: headers(customerId) }
+  )
+  return data
 }
 
 export async function fetchTransactions(params: { customerId?: string; accountId?: number }): Promise<DepositTransaction[]> {
@@ -352,6 +429,46 @@ export async function fetchTransactions(params: { customerId?: string; accountId
 export async function fetchTransaction(transactionId: number): Promise<DepositTransaction> {
   const { data } = await depositApi.get<DepositTransaction>(`/transactions/${transactionId}`)
   return data
+}
+
+export type TransactionChannel = 'BRANCH' | 'ATM' | 'INTERNET' | 'MOBILE' | 'SYSTEM'
+
+export type SavingsPaymentInput = {
+  accountId: number
+  contractId: number
+  amount: number
+  paymentRound: number
+  channelType?: TransactionChannel
+}
+
+// 적금 납입 — POST /transactions/savings-payment
+export async function paySavings(input: SavingsPaymentInput): Promise<DepositTransaction> {
+  const { data } = await depositApi.post<DepositTransaction>('/transactions/savings-payment', {
+    accountId: input.accountId,
+    contractId: input.contractId,
+    amount: input.amount,
+    paymentRound: input.paymentRound,
+    channelType: input.channelType ?? 'INTERNET',
+  })
+  return data
+}
+
+// 거래 취소 — PATCH /transactions/{id}/cancel (백엔드: 출금/이체 거래만 취소 가능)
+export async function cancelTransaction(transactionId: number, cancelReason = 'CUSTOMER_REQUEST'): Promise<DepositTransaction> {
+  const { data } = await depositApi.patch<DepositTransaction>(`/transactions/${transactionId}/cancel`, { cancelReason })
+  return data
+}
+
+// 출금/이체 거래이면서 아직 취소되지 않은 건만 취소 가능
+export function isCancelableTransaction(tx: DepositTransaction): boolean {
+  const cancelable = tx.transactionType === 'WITHDRAW' || tx.transactionType === 'TRANSFER'
+  return cancelable && tx.status !== 'CANCELED'
+}
+
+// 다음 적금 납입 회차 = 기존 적금납입 거래 수 + 1
+export function nextSavingsPaymentRound(transactions: DepositTransaction[]): number {
+  const paid = transactions.filter((tx) => tx.transactionType === 'SAVINGS_PAYMENT' && tx.status !== 'CANCELED').length
+  return paid + 1
 }
 
 export async function fetchDepositAccountViewModels(customerId: string): Promise<DepositViewAccount[]> {
@@ -366,21 +483,44 @@ export async function fetchDepositAccountViewModels(customerId: string): Promise
   const contractById = new Map(contracts.map((contract) => [contract.contractId, contract]))
   const productById = new Map(products.map((product) => [product.productId, product]))
 
+  // localStorage에 저장된 type 정보 활용 (입출금/적금/예금 구분)
+  const localTypeMap = new Map<number, Account['type']>()
+  const localNameMap = new Map<number, string>()
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('joinedAccounts')
+      if (raw) {
+        const parsed = JSON.parse(raw) as DepositViewAccount[]
+        parsed.forEach(a => {
+          if (a.apiAccountId) {
+            localTypeMap.set(a.apiAccountId, a.type as Account['type'])
+            if (a.name) localNameMap.set(a.apiAccountId, a.name)
+          }
+        })
+      }
+    } catch {}
+  }
+
   return accounts
     .filter((account) => account.accountStatus !== 'CLOSED')
     .map((account) => {
       const contract = contractById.get(account.contractId)
       const product = contract ? productById.get(contract.productId) : undefined
       const balance = toNumber(account.balance)
+      const resolvedType = localTypeMap.get(account.accountId) ?? accountTypeLabel(account, product)
+      const resolvedName = account.accountAlias || localNameMap.get(account.accountId) || product?.productName || fallbackName(account)
 
       return {
         id: `deposit-${account.accountId}`,
         apiAccountId: account.accountId,
         contractId: account.contractId,
+        rawAccountType: account.accountType,
+        isWithdrawable: account.isWithdrawable ?? account.withdrawable,
         accountStatus: account.accountStatus,
+        savingType: account.savingType ?? (account.accountType === 'SAVINGS' ? 'REGULAR' : undefined),
         number: account.accountNumber,
-        type: accountTypeLabel(account, product),
-        name: account.accountAlias || product?.productName || fallbackName(account),
+        type: resolvedType,
+        name: resolvedName,
         balance,
         availableBalance: balance,
         createdAt: toDateText(account.openedAt) || '',

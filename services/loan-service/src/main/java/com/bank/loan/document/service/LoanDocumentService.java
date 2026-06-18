@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.bank.loan.document.domain.LoanDocument;
 import com.bank.loan.document.docagent.DocAgentClient;
+import com.bank.loan.document.docagent.DocAgentException;
 import com.bank.loan.document.docagent.SubmissionResult;
 import com.bank.loan.document.domain.LoanDocumentSubmission;
 import com.bank.loan.document.dto.LoanDocumentListResponse;
@@ -33,12 +34,11 @@ public class LoanDocumentService {
 
     private static final String DOMAIN_CD = "LOAN";
     private static final String TARGET_TABLE_CD = "LOAN_DOCUMENT";
-    private static final String REASON_DELETED          = "DOCUMENT_DELETED";
-    private static final String REASON_FRAUD_REJECTED   = "FRAUD_CONFIRMED";
-
+    private static final String REASON_DELETED         = "DOCUMENT_DELETED";
     private static final String REASON_VERIFIED        = "DOCUMENT_VERIFIED";
     private static final String REASON_NEEDS_RESUBMIT  = "DOCUMENT_NEEDS_RESUBMIT";
     private static final String REASON_HOLD            = "DOCUMENT_HOLD";
+    private static final String REASON_VERIFY_DEFERRED = "DOCUMENT_VERIFY_DEFERRED";
 
     private final LoanDocumentRepository repository;
     private final LoanDocumentSubmissionRepository submissionRepository;
@@ -93,11 +93,18 @@ public class LoanDocumentService {
                 .submittedAt(OffsetDateTime.now())
                 .build());
 
-        SubmissionResult result = docAgentClient.submit(
-                application.getApplNo(),
-                docTypeCd,
-                String.valueOf(application.getProdId()),
-                file);
+        SubmissionResult result;
+        try {
+            result = docAgentClient.submit(
+                    application.getApplNo(),
+                    docTypeCd,
+                    String.valueOf(application.getProdId()),
+                    file);
+        } catch (DocAgentException e) {
+            // doc-agent 미연결/일시장애 — 업로드 자체는 성공시키고 검증만 보류(PENDING)한다.
+            // 트랜잭션을 롤백하지 않으므로 서류 row 는 보존되며, 추후 재검증 대상이 된다.
+            return deferVerification(saved, e);
+        }
 
         saved.applyVerifyResult(result.verifyStatus(), result.submissionId());
 
@@ -131,39 +138,23 @@ public class LoanDocumentService {
         return LoanDocumentResponse.of(saved);
     }
 
-    @Transactional
-    public void handleRoutedEvent(String submissionId, String verifyStatus) {
-        repository.findByDocUrlAndDeletedAtIsNull(submissionId).ifPresentOrElse(doc -> {
-            String before = doc.getDocStatusCd();
-            doc.applyVerifyResult(verifyStatus, submissionId);
-            String reason = switch (verifyStatus) {
-                case SubmissionResult.VERIFY_AUTO_PASS      -> REASON_VERIFIED;
-                case SubmissionResult.VERIFY_NEEDS_RESUBMIT -> REASON_NEEDS_RESUBMIT;
-                default                                     -> REASON_HOLD;
-            };
-            statusHistoryPublisher.publish(StatusChangeEvent.of(
-                    DOMAIN_CD, TARGET_TABLE_CD, doc.getDocId(),
-                    before, doc.getDocStatusCd(),
-                    reason, "submissionId=" + submissionId,
-                    null
-            ));
-        }, () -> log.warn("handleRoutedEvent: LoanDocument not found submissionId={}", submissionId));
+    /**
+     * doc-agent 호출 실패 시 검증을 보류(PENDING)하고 업로드를 성공으로 마무리한다.
+     * 서류는 UPLOADED 상태로 남아 추후 재검증 대상이 된다.
+     */
+    private LoanDocumentResponse deferVerification(LoanDocument saved, DocAgentException e) {
+        log.warn("doc-agent 연동 실패 — 서류 docId={} 검증 보류(PENDING) 처리: {}",
+                saved.getDocId(), e.toString());
+        saved.markVerificationDeferred();
+
+        statusHistoryPublisher.publish(StatusChangeEvent.of(
+                DOMAIN_CD, TARGET_TABLE_CD, saved.getDocId(),
+                LoanDocument.STATUS_UPLOADED, saved.getDocStatusCd(),
+                REASON_VERIFY_DEFERRED, "docAgentError=" + e.getMessage(),
+                currentActor.currentActorId()
+        ));
+
+        return LoanDocumentResponse.of(saved);
     }
 
-    @Transactional
-    public void handleFraudAuditEvent(String submissionId, String applicationId, String retentionUntil) {
-        applicationRepository.findByApplNoAndDeletedAtIsNull(applicationId).ifPresentOrElse(appl -> {
-            String before = appl.currentStatus();
-            appl.markRejected();
-            statusHistoryPublisher.publish(StatusChangeEvent.of(
-                    "LOAN", "LOAN_APPLICATION", appl.getApplId(),
-                    before, LoanApplication.STATUS_REJECTED,
-                    REASON_FRAUD_REJECTED, "submissionId=" + submissionId,
-                    null
-            ));
-        }, () -> log.warn("handleFraudAuditEvent: LoanApplication not found applNo={}", applicationId));
-
-        repository.findByDocUrlAndDeletedAtIsNull(submissionId)
-                .ifPresent(doc -> doc.markRetained(retentionUntil));
-    }
 }

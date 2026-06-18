@@ -1,4 +1,5 @@
 'use client'
+import { KB_MINT,KB_PRIMARY,KB_PRIMARY_BORDER,KB_PRIMARY_SURFACE } from '@/lib/theme'
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -65,7 +66,6 @@ export const GNB_MENUS = [
           { label: '신규결과/내역 조회', href: '/products/deposit/inquiry/new' },
           { label: '예금해지',          href: '/products/deposit/inquiry/terminate' },
           { label: '해지결과/내역 조회', href: '/products/deposit/inquiry/terminate-result' },
-          { label: '예금전환',          href: '/products/deposit/manage/convert' },
         ],
       },
       {
@@ -75,6 +75,8 @@ export const GNB_MENUS = [
           { label: '대출 상품/신청', href: '/products/loan/credit' },
           { label: '대출진행현황',  href: '/products/loan/status' },
           { label: '대출관리',      href: '/products/loan/manage/rate' },
+          { label: '대출 가이드',    href: '/products/loan/guide/rate' },
+          { label: '여신심사 자료제출', href: '/products/loan/credit-eval/biz-plan' },
         ],
       },
     ],
@@ -89,29 +91,32 @@ export const GNB_MENUS = [
         href: '/support/customer-info/online-join',
         items: [
           { label: '온라인고객 신규가입', href: '/support/customer-info/online-join' },
-          { label: '회원탈퇴',           href: '/support/customer-info/withdraw' },
           { label: '개인정보 수정',       href: '/settings' },
+          { label: '회원탈퇴',           href: '/support/customer-info/withdraw' },
         ],
       },
       {
         title: '계좌관리',
-        href: '/banking/transfer-limit',
+        href: '/banking/withdrawal-account',
         items: [
-          { label: '이체한도 조회/변경', href: '/banking/transfer-limit' },
+          { label: '타행 출금계좌 등록/삭제', href: '/banking/withdrawal-account' },
+          { label: '이체한도 조회/변경',          href: '/banking/transfer-limit' },
         ],
       },
       {
         title: '인터넷 뱅킹관리',
-        href: '/banking/first-visit',
+        href: '/support/customer-info/id-password',
         items: [
           { label: 'ID조회/사용자암호 설정', href: '/support/customer-info/id-password' },
+          { label: '인터넷뱅킹 해지',        href: '/support/customer-info/internet-banking-cancel' },
         ],
       },
       {
         title: '이용안내',
-        href: '/support/internet-banking-guide',
+        href: '/banking/first-visit',
         items: [
           { label: '첫 방문 고객을 위한 안내', href: '/banking/first-visit' },
+          { label: '인터넷뱅킹 FAQ',          href: '/support/faq' },
           { label: '인터넷뱅킹 이용안내',      href: '/support/internet-banking-guide' },
           { label: '이용수수료 안내',          href: '/support/fee-guide' },
         ],
@@ -124,6 +129,17 @@ export const GNB_MENUS = [
 interface StoredUser { name: string; email: string; customer_id: number }
 
 const SESSION_SECONDS = 10 * 60 // 10분
+const SESSION_MS = SESSION_SECONDS * 1000
+
+function getStoredToken() {
+  return localStorage.getItem('accessToken') || localStorage.getItem('access_token')
+}
+
+function renewLocalSession() {
+  const expiry = Date.now() + SESSION_MS
+  localStorage.setItem('sessionExpiry', String(expiry))
+  return expiry
+}
 
 function formatTime(sec: number) {
   const m = String(Math.floor(sec / 60)).padStart(2, '0')
@@ -134,24 +150,68 @@ function formatTime(sec: number) {
 export default function Header() {
   const pathname = usePathname()
   const [activeMenu, setActiveMenu] = useState<string | null>(null)
+  // 로그인 여부는 토큰으로 판단한다(홈과 동일 기준). user 프로필은 인사말 표시에만 쓰며,
+  // me 조회가 실패해 user 키가 비어 있어도 토큰만 있으면 로그인 UI를 보여준다.
+  const [authed, setAuthed] = useState(false)
   const [user, setUser] = useState<StoredUser | null>(null)
   const [remaining, setRemaining] = useState(SESSION_SECONDS)
   const [extending, setExtending] = useState(false)
+  const [extendError, setExtendError] = useState(false)
+  const isLoggedIn = user !== null
 
   useEffect(() => {
+    // sessionExpiry 체크: 만료됐으면 로그아웃, 없으면 토큰 있을 때 세션 복원
+    const expiry = localStorage.getItem('sessionExpiry')
+    const token = localStorage.getItem('accessToken') || localStorage.getItem('access_token')
+    if (expiry && parseInt(expiry, 10) <= Date.now()) {
+      // 명시적으로 만료된 세션만 강제 로그아웃
+      localStorage.removeItem('accessToken')
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refreshToken')
+      localStorage.removeItem('sessionExpiry')
+      localStorage.removeItem('user')
+      localStorage.removeItem('customerId')
+      setAuthed(false)
+      setUser(null)
+      return
+    }
+    if (!expiry && token) {
+      // sessionExpiry 없지만 토큰 있으면 30분 세션 복원 (로그인 중 페이지 이동 대응)
+      localStorage.setItem('sessionExpiry', String(Date.now() + 30 * 60 * 1000))
+    }
+    setAuthed(!!(localStorage.getItem('accessToken') || localStorage.getItem('access_token')))
+    if (pathname.startsWith('/logout')) {
+      setUser(null)
+      return
+    }
+
+
     try {
       const stored = localStorage.getItem('user')
-      if (stored) setUser(JSON.parse(stored))
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        setUser(prev => {
+          if (prev?.customer_id === parsed?.customer_id) return prev
+          return parsed
+        })
+        return
+      }
+      setUser(null)
     } catch {}
-  }, [])
+  }, [pathname])
 
   // 카운트다운 + 자동 로그아웃
   useEffect(() => {
-    if (!user) return
+    if (!authed && !isLoggedIn) return
 
     const stored = localStorage.getItem('sessionExpiry')
-    const expiry = stored ? parseInt(stored) : Date.now() + SESSION_SECONDS * 1000
-    if (!stored) localStorage.setItem('sessionExpiry', String(expiry))
+    const parsedExpiry = stored ? parseInt(stored, 10) : NaN
+    const hasValidToken = Boolean(getStoredToken())
+    const expiry = !Number.isFinite(parsedExpiry) || parsedExpiry <= Date.now()
+      ? hasValidToken
+        ? renewLocalSession()
+        : Date.now()
+      : parsedExpiry
 
     const seconds = Math.max(0, Math.round((expiry - Date.now()) / 1000))
     setRemaining(seconds)
@@ -159,13 +219,23 @@ export default function Header() {
     const tick = setInterval(() => {
       const storedExpiry = localStorage.getItem('sessionExpiry')
       if (!storedExpiry) {
+        if (getStoredToken()) {
+          const renewed = renewLocalSession()
+          setRemaining(Math.max(0, Math.round((renewed - Date.now()) / 1000)))
+          return
+        }
         clearInterval(tick)
-        window.location.href = '/logout'
+        setUser(null)
         return
       }
       const remaining = Math.max(0, Math.round((parseInt(storedExpiry) - Date.now()) / 1000))
       setRemaining(remaining)
       if (remaining <= 0) {
+        if (getStoredToken()) {
+          const renewed = renewLocalSession()
+          setRemaining(Math.max(0, Math.round((renewed - Date.now()) / 1000)))
+          return
+        }
         clearInterval(tick)
         localStorage.removeItem('access_token')
         localStorage.removeItem('accessToken')
@@ -173,14 +243,14 @@ export default function Header() {
         localStorage.removeItem('sessionExpiry')
         localStorage.removeItem('user')
         localStorage.removeItem('customerId')
-        window.location.href = '/logout'
+        setUser(null)
       }
     }, 1000)
 
     return () => {
       clearInterval(tick)
     }
-  }, [user])
+  }, [authed, isLoggedIn, pathname])
 
 
   function handleLogout() {
@@ -190,6 +260,8 @@ export default function Header() {
     localStorage.removeItem('sessionExpiry')
     localStorage.removeItem('user')
     localStorage.removeItem('customerId')
+    sessionStorage.clear()
+    setUser(null)
     window.location.href = '/logout?reason=manual'
   }
 
@@ -197,10 +269,16 @@ export default function Header() {
     if (extending) return
     const refreshToken = localStorage.getItem('refreshToken')
     if (!refreshToken) {
-      window.location.href = '/logout'
+      if (getStoredToken()) {
+        const newExpiry = renewLocalSession()
+        setRemaining(Math.max(0, Math.round((newExpiry - Date.now()) / 1000)))
+        return
+      }
+      setUser(null)
       return
     }
     setExtending(true)
+    setExtendError(false)
     try {
       const { data } = await api.post('/api/v1/auth/refresh', { refreshToken })
       localStorage.setItem('accessToken', data.data.accessToken)
@@ -212,7 +290,14 @@ export default function Header() {
       localStorage.setItem('sessionExpiry', String(newExpiry))
       setRemaining(SESSION_SECONDS)
     } catch {
-      window.location.href = '/logout'
+      if (localStorage.getItem('accessToken') || localStorage.getItem('access_token')) {
+        const newExpiry = Date.now() + SESSION_SECONDS * 1000
+        localStorage.setItem('sessionExpiry', String(newExpiry))
+        setRemaining(SESSION_SECONDS)
+        setExtendError(false)
+      } else {
+        setExtendError(true)
+      }
     } finally {
       setExtending(false)
     }
@@ -228,25 +313,28 @@ export default function Header() {
       <div className="max-w-kb-container mx-auto px-6 flex items-center justify-between h-[60px]">
         {/* 로고 */}
         <Link href="/" className="flex items-center gap-3">
-          <div className="w-[6px] h-[26px] rounded-full" style={{ backgroundColor: '#5BC9A8' }} />
-          <span className="text-[26px] font-bold tracking-[0.02em]" style={{ color: '#0D5C47' }}>AXful Bank</span>
+          <div className="w-[6px] h-[26px] rounded-full" style={{ backgroundColor: KB_MINT }} />
+          <span className="text-[26px] font-bold tracking-[0.02em]" style={{ color: KB_PRIMARY }}>AXful Bank</span>
         </Link>
 
         {/* 우측: 사용자 영역 */}
         {!isLoginPage && (
           <div className="flex items-center gap-2 text-[14px]">
-            {user ? (
+            {authed ? (
               <>
-                <span className="text-kb-text-muted font-medium">{user.name}님</span>
+                <span className="text-kb-text-muted font-medium">{user?.name ?? '고객'}님</span>
                 <span className="text-kb-border">|</span>
                 <Link href="/mypage" className="text-kb-text-muted hover:text-kb-text transition-colors">My AXful</Link>
                 <span className="text-kb-border">|</span>
                 <span className="text-kb-text-muted">🔒 {formatTime(remaining)}</span>
+                {extendError && (
+                  <span className="text-[12px] text-red-500">연장 실패 — 재시도하거나 로그아웃하세요</span>
+                )}
                 <button onClick={handleExtend}
                   disabled={extending}
-                  className="px-3 py-1 text-[13px] font-semibold rounded-full border transition-colors hover:bg-[#F0FAF7] disabled:opacity-50"
-                  style={{ borderColor: '#5BC9A8', color: '#0D5C47' }}>
-                  {extending ? '연장 중...' : '연장'}
+                  className="px-3 py-1 text-[13px] font-semibold rounded-full border transition-colors hover:bg-kb-primary-bg disabled:opacity-50"
+                  style={{ borderColor: extendError ? '#EF4444' : KB_MINT, color: extendError ? '#EF4444' : KB_PRIMARY }}>
+                  {extending ? '연장 중...' : extendError ? '재시도' : '연장'}
                 </button>
                 <button onClick={handleLogout}
                   className="px-3 py-1 text-[13px] font-semibold rounded-full border border-gray-200 text-kb-text-muted hover:bg-gray-50 transition-colors">
@@ -254,20 +342,20 @@ export default function Header() {
                 </button>
                 <Link href="/cert"
                   className="px-3 py-1 text-[13px] font-semibold rounded-full text-white transition-opacity hover:opacity-85"
-                  style={{ backgroundColor: '#0D5C47' }}>
+                  style={{ backgroundColor: KB_PRIMARY }}>
                   인증센터
                 </Link>
               </>
             ) : (
               <>
                 <Link href="/login"
-                  className="px-4 py-1 text-[13px] font-semibold rounded-full border transition-colors hover:bg-[#F0FAF7]"
-                  style={{ borderColor: '#5BC9A8', color: '#0D5C47' }}>
+                  className="px-4 py-1 text-[13px] font-semibold rounded-full border transition-colors hover:bg-kb-primary-bg"
+                  style={{ borderColor: KB_MINT, color: KB_PRIMARY }}>
                   로그인
                 </Link>
                 <Link href="/cert"
                   className="px-4 py-1 text-[13px] font-semibold rounded-full text-white transition-opacity hover:opacity-85"
-                  style={{ backgroundColor: '#0D5C47' }}>
+                  style={{ backgroundColor: KB_PRIMARY }}>
                   인증센터
                 </Link>
               </>
@@ -279,7 +367,7 @@ export default function Header() {
       {/* ===== 2. GNB + 메가메뉴 ===== */}
       {!hideGnb && <nav
         className="relative border-t"
-        style={{ backgroundColor: '#F8FFFE', borderColor: '#E2F5EF' }}
+        style={{ backgroundColor: KB_PRIMARY_SURFACE, borderColor: KB_PRIMARY_BORDER }}
         onMouseLeave={() => setActiveMenu(null)}
       >
         <div className="max-w-kb-container mx-auto px-6">
@@ -300,15 +388,15 @@ export default function Header() {
                       flex items-center justify-center w-full px-5
                       text-[16px] font-semibold transition-colors duration-150 whitespace-nowrap relative
                       ${isActive
-                        ? 'text-[#0D5C47] font-bold'
+                        ? 'text-kb-primary font-bold'
                         : isOpen
-                        ? 'text-[#0D5C47] bg-[#F0FAF7]'
-                        : 'text-kb-text-body hover:text-[#0D5C47] hover:bg-[#F0FAF7]'}
+                        ? 'text-kb-primary bg-kb-primary-bg'
+                        : 'text-kb-text-body hover:text-kb-primary hover:bg-kb-primary-bg'}
                     `}
                   >
                     {menu.label}
                     {isActive && (
-                      <span className="absolute bottom-0 left-1/4 right-1/4 h-[2px] rounded-full" style={{ backgroundColor: '#5BC9A8' }} />
+                      <span className="absolute bottom-0 left-1/4 right-1/4 h-[2px] rounded-full" style={{ backgroundColor: KB_MINT }} />
                     )}
                   </Link>
                 </li>
@@ -326,7 +414,7 @@ export default function Header() {
                   <div key={category.title}
                     className={ci > 0 ? 'border-l border-kb-border pl-6 text-center' : 'text-center'}>
                     <Link
-                      href={category.href}
+                      href={category.items[0]?.href ?? category.href}
                       onClick={() => setActiveMenu(null)}
                       className="block text-[17px] font-bold text-kb-text mb-1 hover:text-kb-taupe"
                     >

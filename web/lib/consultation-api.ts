@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { executeDepositTransfer } from '@/lib/deposit-api'
 
 export type ChatbotButton = {
   id: number
@@ -17,6 +18,8 @@ export type ChatbotStartResponse = {
 export type ChatbotMessageResponse = ChatbotStartResponse & {
   process_method: string
   agent_transfer_required: boolean
+  feature_code?: string
+  feature_data?: Record<string, unknown>[]
 }
 
 export type ChatbotFeatureExecuteRequest = {
@@ -147,12 +150,17 @@ export type TransferResult = {
 export async function executeChatbotTransfer(payload: {
   customer_no: string
   from_account_id: number
+  to_account_id?: number
   to_account_number: string
+  to_bank_name?: string
   amount: number
   memo?: string
 }): Promise<TransferResult> {
   const { data } = await consultationApi.post<TransferResult>('/chatbot/transfer', {
-    ...payload,
+    customer_no: payload.customer_no,
+    from_account_id: payload.from_account_id,
+    to_account_number: payload.to_account_number,
+    amount: payload.amount,
     memo: payload.memo ?? '이체',
   })
   return data
@@ -163,5 +171,48 @@ export async function endChat(chatConsultationId: number, satisfactionScore?: nu
     `/chat/consultations/${chatConsultationId}/end`,
     { satisfaction_score: satisfactionScore ?? null },
   )
+  return data
+}
+
+// ── 파일 분석 / 서류 제출 ──────────────────────────────────────────────────────
+
+export type FileAnalyzeResponse = {
+  analyze_type: string
+  result: string
+}
+
+export type DocumentUploadResponse = {
+  document_id: number
+  filename: string
+  doc_type: string
+  status: string
+  message: string
+}
+
+export async function analyzeFile(
+  text: string,
+  analyzeType: 'CASH_FLOW' | 'TERMS' | 'PRODUCT',
+  customerNo?: string,
+): Promise<FileAnalyzeResponse> {
+  const { data } = await consultationApi.post<FileAnalyzeResponse>('/chatbot/file/analyze', {
+    text,
+    analyze_type: analyzeType,
+    customer_no: customerNo,
+  })
+  return data
+}
+
+export async function uploadDocument(
+  file: File,
+  customerNo: string,
+  docType: string = 'ENROLLMENT',
+): Promise<DocumentUploadResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('customer_no', customerNo)
+  form.append('doc_type', docType)
+  const { data } = await consultationApi.post<DocumentUploadResponse>('/chatbot/documents/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return data
 }

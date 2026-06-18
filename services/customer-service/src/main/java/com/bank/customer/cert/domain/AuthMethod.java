@@ -15,6 +15,9 @@ public class AuthMethod extends BaseEntity {
     public static final String STATUS_ACTIVE   = "ACTIVE";
     public static final String STATUS_INACTIVE = "INACTIVE";
 
+    /** auth_method_type_code CHECK 제약 허용값 중 간편비밀번호 타입 */
+    public static final String TYPE_PIN = "PIN";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "auth_method_id")
@@ -40,4 +43,16 @@ public class AuthMethod extends BaseEntity {
 
     @Column(name = "auth_method_expiry_date", length = 8)
     private String authMethodExpiryDate;
+
+    @Column(name = "auth_method_last_used_at")
+    private java.time.OffsetDateTime authMethodLastUsedAt;
+
+    public boolean isActive()  { return STATUS_ACTIVE.equals(authMethodStatusCode); }
+    public boolean isPrimary() { return "T".equals(primaryAuthMethodYn); }
+
+    public void updateAlias(String alias)  { this.authMethodAliasName = alias; }
+    public void deactivate()               { this.authMethodStatusCode = STATUS_INACTIVE; }
+    public void activate()                 { this.authMethodStatusCode = STATUS_ACTIVE; }
+    public void setPrimary(boolean primary){ this.primaryAuthMethodYn = primary ? "T" : "F"; }
+    public void recordUsed()               { this.authMethodLastUsedAt = java.time.OffsetDateTime.now(); }
 }

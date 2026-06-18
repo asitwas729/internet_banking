@@ -1,4 +1,5 @@
-'use client'
+﻿'use client'
+import { KB_PRIMARY } from '@/lib/theme'
 
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
@@ -12,39 +13,38 @@ const NAV: SidebarItem[] = [
     label: '대출상품/신청',
     expandable: true,
     children: [
-      { label: '한도조회(가심사)',       href: '/products/loan/prescreening' },
       { label: '신용대출',             href: '/products/loan/credit' },
       { label: '담보대출',             href: '/products/loan/mortgage' },
       { label: '전월세/반환보증',       href: '/products/loan/jeonse' },
       { label: '자동차대출',           href: '/products/loan/auto' },
       { label: '집단중도금/이주비대출', href: '/products/loan/group' },
       { label: '주택도시기금대출',      href: '/products/loan/khfc' },
-      { label: '개인사업자대출',        href: '/products/loan/biz' },
     ],
   },
   {
     label: '대출진행현황',
-    expandable: true,
-    children: [
-      { label: '진행현황조회/실행/예약', href: '/products/loan/status' },
-      { label: '사후서류제출',           href: '/products/loan/status/docs' },
-      { label: '전자서명 (약정 체결)',   href: '/products/loan/status/sign' },
-      { label: '대출 실행',             href: '/products/loan/status/execute' },
-    ],
+    href: '/products/loan/status',
   },
   {
     label: '대출관리',
     expandable: true,
     children: [
-      { label: '내 대출 현황',            href: '/products/loan/my' },
-      { label: '적용금리조회',           href: '/products/loan/manage/rate' },
-      { label: '이자/월부금입금',         href: '/products/loan/manage/payment' },
-      { label: '대출금상환',             href: '/products/loan/manage/repay' },
-      { label: '대출계약철회/완제',       href: '/products/loan/manage/withdraw' },
-      { label: '기한연장',              href: '/products/loan/manage/extend' },
-      { label: '금리인하요구권',         href: '/products/loan/manage/rate-cut' },
-      { label: '연체정보조회',           href: '/products/loan/manage/delinquency' },
-      { label: '증명서 발급',            href: '/products/loan/manage/certificate' },
+      { label: '내 대출 현황',                                        href: '/products/loan/my' },
+      { label: '적용금리조회',                                        href: '/products/loan/manage/rate' },
+      { label: '이자/월부금입금',                                      href: '/products/loan/manage/payment' },
+      { label: '대출금상환',                                          href: '/products/loan/manage/repay' },
+      { label: '대출계약철회 예상조회/완제',                            href: '/products/loan/manage/withdraw' },
+      { label: '상환 취소(역분개)',                                    href: '/products/loan/manage/reversal' },
+      { label: '기한연장',                                            href: '/products/loan/manage/extend' },
+      { label: '개인대출 금리인하요구권',                              href: '/products/loan/manage/rate-cut' },
+      { label: '해지계좌조회',                                        href: '/products/loan/manage/closed' },
+      { label: '금리산정내역서 조회',                                  href: '/products/loan/manage/rate-detail' },
+      { label: '소멸시효완성에 따른 채무면제 결과조회',                 href: '/products/loan/manage/debt-relief' },
+      { label: '통장자동대출 이자납입내역 조회',                        href: '/products/loan/manage/auto-interest' },
+      { label: '개인대출 통지서비스 변경',                             href: '/products/loan/manage/notify' },
+      { label: '개인대출 할부금(이자) 납입방법 변경',                  href: '/products/loan/manage/payment-method' },
+      { label: '연체정보조회',                                        href: '/products/loan/manage/delinquency' },
+      { label: '보증보험 발급/조회',                                   href: '/products/loan/manage/guarantee-insurance' },
     ],
   },
 ]
@@ -88,12 +88,12 @@ export default function LoanSidebar() {
   }
 
   function isActive(href: string) {
-    return pathname === href
+    return pathname === href || pathname.startsWith(href + '/')
   }
 
   return (
     <aside className="w-[200px] flex-shrink-0 border-r border-kb-border min-h-[700px] pt-6 pr-2">
-      <h2 className="text-[13px] font-bold mb-4 px-2 pb-2 border-b border-kb-border flex items-center gap-2" style={{ color: '#0D5C47' }}>대출</h2>
+      <h2 className="text-[13px] font-bold mb-4 px-2 pb-2 border-b border-kb-border flex items-center gap-2" style={{ color: KB_PRIMARY }}>대출</h2>
       <nav>
         {NAV.map((item) => (
           <div key={item.label}>
@@ -101,7 +101,7 @@ export default function LoanSidebar() {
               <>
                 <button
                   onClick={() => toggle(item.label)}
-                  className="w-full flex items-center justify-between px-2 py-2 text-[13px] text-kb-text-body hover:text-kb-text hover:bg-[#F0FAF7] transition-colors"
+                  className="w-full flex items-center justify-between px-2 py-2 text-[13px] text-kb-text-body hover:text-kb-text hover:bg-kb-primary-bg transition-colors"
                 >
                   <span className="text-left leading-tight">{item.label}</span>
                   <span className="text-[11px] text-kb-text-muted ml-1 flex-shrink-0 font-bold">
@@ -119,10 +119,10 @@ export default function LoanSidebar() {
                         ) : (
                           <Link
                             href={child.href}
-                            className={`block py-1.5 text-[12px] leading-snug transition-colors ${
+                            className={`block pl-5 pr-2 py-1.5 text-[12px] leading-snug transition-colors ${
                               isActive(child.href)
-                                ? 'pl-[17px] pr-2 border-l-[3px] border-[#5BC9A8] bg-[#F0FAF7] font-semibold text-[#0D5C47]'
-                                : 'pl-5 pr-2 text-kb-text-muted hover:text-kb-text hover:bg-[#F0FAF7]'
+                                ? 'pl-[17px] pr-2 border-l-[3px] border-kb-mint bg-kb-primary-bg font-semibold text-kb-primary'
+                                : 'pl-5 pr-2 text-kb-text-muted hover:text-kb-text hover:bg-kb-primary-bg'
                             }`}
                           >
                             {child.label}

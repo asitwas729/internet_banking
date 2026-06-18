@@ -65,6 +65,7 @@ public enum LoanErrorCode implements ErrorCode {
     LOAN_054(HttpStatus.NOT_FOUND,            "LTV 산정 내역을 찾을 수 없습니다."),
 
     LOAN_055(HttpStatus.UNPROCESSABLE_ENTITY, "서류 검증이 완료되지 않았습니다. NEEDS_RESUBMIT 또는 HOLD 상태의 서류가 남아있습니다."),
+    LOAN_056(HttpStatus.SERVICE_UNAVAILABLE,  "서류 검증 서비스(doc-agent) 일시 장애입니다. 잠시 후 다시 시도해 주세요."),
 
     LOAN_060(HttpStatus.UNPROCESSABLE_ENTITY, "약정 가능한 신청 상태가 아닙니다. (APPROVED 필요)"),
     LOAN_061(HttpStatus.BAD_REQUEST,          "약정 조건이 신청 범위를 벗어났습니다."),
@@ -151,6 +152,20 @@ public enum LoanErrorCode implements ErrorCode {
 
     // Advisory (201)
     LOAN_201(HttpStatus.UNPROCESSABLE_ENTITY, "CRITICAL Advisory 리포트를 먼저 확인(ACK)해야 합니다."),
+
+    // 접근 제어 (202)
+    LOAN_202(HttpStatus.FORBIDDEN, "해당 대출 건에 대한 조회 권한이 없습니다."),
+
+    // 이상거래 상신 (203-204)
+    LOAN_203(HttpStatus.CONFLICT, "이미 본사에 상신된 건입니다."),
+    LOAN_204(HttpStatus.UNPROCESSABLE_ENTITY, "현재 상태에서는 본사 상신이 불가합니다. 심사 진행 중인 건만 상신할 수 있습니다."),
+
+    // break-glass 긴급 접근 (205-206)
+    LOAN_205(HttpStatus.BAD_REQUEST, "break-glass 사유는 10자 이상이어야 합니다."),
+    LOAN_206(HttpStatus.NOT_FOUND,   "break-glass 대상 건을 찾을 수 없습니다."),
+
+    // 본심사 정정(재심사) 4-eye (207)
+    LOAN_207(HttpStatus.FORBIDDEN,   "정정(재심사) 행위자를 인증할 수 없거나, 최종 승인자 본인이 자신의 승인 건을 단독 정정할 수 없습니다. 4-eye 원칙에 따라 다른 사람이 정정해야 합니다."),
 
     // RAG (210-219)
     LOAN_210(HttpStatus.SERVICE_UNAVAILABLE,  "임베딩 API 호출에 실패했습니다. 잠시 후 재시도하세요."),

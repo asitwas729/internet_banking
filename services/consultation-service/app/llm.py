@@ -6,6 +6,13 @@
 # CASH_FLOW_RECOMMEND 는 PRODUCT_GUIDE 보다 앞에 위치해야 한다
 # (더 구체적인 "내 패턴/현금흐름 분석 기반" 의도이므로)
 _INTENT_PRIORITY: list[str] = [
+    "SAVINGS_GOAL",
+    "REINVESTMENT_RECOMMEND",
+    "MATURITY_MANAGEMENT",
+    "MATURITY_SCHEDULE",
+    "SPENDING_PATTERN",
+    "MY_ACCOUNTS",
+    "INTEREST_HISTORY",
     "RATE_GUIDE",
     "JOIN_CONDITION",
     "PRODUCT_COMPARE",
@@ -16,12 +23,59 @@ _INTENT_PRIORITY: list[str] = [
 ]
 
 _INTENT_KEYWORDS: dict[str, list[str]] = {
+    "SPENDING_PATTERN": [
+        "지출 패턴", "소비 패턴", "지출 분석", "소비 분석",
+        "얼마나 썼", "얼마 썼", "돈 어디에 썼", "돈 어디 썼", "돈을 어디에",
+        "이번 달 지출", "이번달 지출", "월별 지출", "지출 내역",
+        "소비 현황", "지출 현황", "과소비", "지출이 늘", "지출 늘었",
+        "많이 썼", "너무 썼", "지출 경고", "지출 알림",
+        "지출", "소비",
+    ],
+    "REINVESTMENT_RECOMMEND": [
+        "재투자", "재예치", "재가입", "다시 가입",
+        "만기 추천", "만기 상품 추천", "만기 운용 추천",
+        "어디에 넣", "어디다 넣", "어디에 재",
+    ],
+    "MATURITY_MANAGEMENT": [
+        "만기 후 어떻게", "만기되면 어떻게", "만기 상품 어떻게", "만기 되면 어떻게",
+        "만기됐", "만기 됐", "만기됐는데", "만기 됐는데",
+        "만기되면", "만기 되면", "만기 후",
+        "만기 운용", "갱신", "자동 갱신",
+    ],
+    "MATURITY_SCHEDULE": [
+        "만기일", "만기 예정", "만기 언제", "만기일 언제",
+        "곧 만기", "다음 달 만기", "이번 달 만기", "만기 상품",
+        "만기 알려", "만기 확인", "만기 조회", "만기 내역",
+        "언제 만기", "만기 날짜", "만기 일정",
+    ],
+    "SAVINGS_GOAL": [
+        "모으고", "모으려", "모아야", "모을래", "모을게", "모아볼", "모아서",
+        "모아야", "모아두", "모으면", "모으나", "모을 수", "모을수",
+        "저축 목표", "저축목표", "목표 금액", "목표금액",
+        "저축 계획", "저축계획", "얼마 모으", "얼마나 모으",
+        "몇 개월이면", "몇년이면",
+        "만원 목표", "억 목표", "천만원 목표", "원 목표",
+        "개월안에", "개월 안에", "년안에", "년 안에", "달안에", "달 안에",
+        "목표 달성", "목표로", "목표 세워", "목표를 세",
+        "원 모으", "만원 모", "억 모",
+    ],
+    "MY_ACCOUNTS": [
+        "내 계좌", "내계좌", "계좌 보여", "계좌 조회", "계좌조회",
+        "계좌 목록", "계좌 알려", "내 통장", "통장 보여", "잔액 조회",
+        "잔액 보여", "잔액 알려", "내 잔액",
+    ],
+    "INTEREST_HISTORY": [
+        "이자 내역", "이자내역", "이자 조회", "이자 확인", "이자 얼마 받",
+        "이자 받은", "이자 지급", "이자 내역 보여", "이자 내역 알려",
+        "이번 달 이자", "이자 내역 조회",
+    ],
     "RATE_GUIDE": [
         "금리 목록", "금리 보여", "금리 알려줘", "이자율 알려", "금리 현황",
         "금리 알려", "금리 어떻게", "금리가 어떻게", "금리가 얼마", "금리 얼마",
         "이자 얼마", "이자율이", "금리 비교", "어떤 금리", "금리 정보",
         "모든 금리", "전체 금리", "상품 금리", "금리 보여줘",
         "금리 말해줘", "금리들", "금리 다", "금리 전부",
+        "우대금리", "우대 금리", "우대금리 조건", "우대금리 알려",
     ],
     "JOIN_CONDITION": [
         "가입 조건", "가입조건", "가입 자격", "가입 대상",
@@ -88,9 +142,11 @@ class IntentClassifier:
         # 1. 등록된 키워드 매칭 — 단, PRODUCT_COMPARE는 개인 추천 의도가 없을 때만
         for feature_code in _INTENT_PRIORITY:
             if any(kw in msg for kw in _INTENT_KEYWORDS[feature_code]):
-                # 비교 질문이지만 개인 추천 의도가 함께 있으면 CASH_FLOW_RECOMMEND로
+                # 비교 질문 + 개인 추천 의도: 명시적 비교 키워드("비교", "차이")가 있으면 PRODUCT_COMPARE 유지
                 if feature_code == "PRODUCT_COMPARE" and (has_personal or has_recommend):
-                    return "CASH_FLOW_RECOMMEND"
+                    has_explicit_compare = any(w in msg for w in ["비교", "차이", "다른 점", "다른점"])
+                    if not has_explicit_compare:
+                        return "CASH_FLOW_RECOMMEND"
                 return feature_code
 
         has_product = any(p in msg for p in _PRODUCT_TYPES)
@@ -106,6 +162,9 @@ class IntentClassifier:
             "하나만", "딱 하나", "하나 골라", "하나 추천",
         ]
         if any(w in msg for w in _COMPARE_FOLLOW_UP):
+            # "비교"가 명시적으로 있으면 PRODUCT_COMPARE로 처리
+            if any(w in msg for w in ["비교", "차이", "다른 점"]):
+                return "PRODUCT_COMPARE"
             return "CASH_FLOW_RECOMMEND"
 
         # 3. "예금"과 "적금"이 같이 나올 때: 추천 의도가 있을 때만 CASH_FLOW_RECOMMEND
@@ -238,90 +297,21 @@ class FeatureAnswerFormatter:
         return "\n".join(lines)
 
 
-import time
-
-from langfuse.decorators import observe
-
-from app.metrics import (
-    chatbot_fallback_total,
-    chatbot_llm_completion_tokens,
-    chatbot_llm_duration_seconds,
-    chatbot_llm_error_total,
-    chatbot_llm_prompt_tokens,
-)
-
-# ──────────────────────────────────────────────────────────────────────────────
-# LLM 응답 (OpenAI)
-# ──────────────────────────────────────────────────────────────────────────────
-
-_SYSTEM_PROMPT = """당신은 인터넷 뱅킹 고객 상담 챗봇입니다.
-예금, 적금, 청약 등 수신 금융상품에 대한 질문에 친절하고 정확하게 답변하세요.
-
-규칙:
-1. 고객의 자연어 질문을 의도에 맞게 해석하세요. 구어체·줄임말도 이해하세요.
-2. [참고 정보]에 추천 상품 목록이 있으면, 해당 상품에 대한 후속 질문으로 간주하고 그 정보를 바탕으로 답하세요.
-3. 예금과 적금의 차이, 금리 개념, 가입 방법 등 일반 금융 질문에는 간단명료하게 설명하세요.
-4. '제일 좋은', '가장 좋은', '최고의', '1위', '어떤 게 나아', '골라줘', '추천해줘' 등 단일 추천을 묻는 질문에는 상품 1개만 지정해서 답하세요.
-5. 장점·특징·이유 등을 묻는 후속 질문에는 bullet point로 구체적으로 답하세요.
-6. 본인 계좌/계약 조회처럼 인증이 필요한 경우에는 '상담사 연결이 필요합니다'라고 안내하세요.
-7. 답변은 한국어로, 간결하게 (300자 이내) 작성하세요."""
-
-
 class LlmAdapter:
-    """OpenAI API를 호출해 자유 텍스트 질문에 답변."""
+    """외부 AI 호출 없이 기존 서비스 생성자와 테스트 계약을 유지하는 어댑터."""
 
-    process_method_code = "BP003_GPT"
+    process_method_code = "BP003_RULE"
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str = "", model: str = "rule-based"):
         self.api_key = api_key
         self.model = model
 
-    @observe(name="llm-answer")
     def answer(self, message: str, context: str = "") -> tuple[str, bool]:
-        """LLM 응답을 반환한다.
-
-        Returns:
-            (response_text, is_error) — is_error=True 이면 LLM 호출 실패를 의미하며
-            호출자가 상담사 이관 등 fallback 처리를 수행해야 한다.
-        """
-        from langfuse.decorators import langfuse_context
-        langfuse_context.update_current_trace(
-            tags=["consultation-service"],
-            metadata={"service": "consultation-service"},
+        return (
+            "자동 답변 범위를 벗어난 문의입니다. 상담사 연결을 이용해 주세요.",
+            True,
         )
-        start = time.perf_counter()
-        is_error = False
-        try:
-            from langfuse.openai import OpenAI
-            client = OpenAI(api_key=self.api_key)
 
-            messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-            if context:
-                messages.append({"role": "system", "content": f"[참고 정보]\n{context}"})
-            messages.append({"role": "user", "content": message})
-
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=500,
-                temperature=0.3,
-            )
-            if response.usage:
-                chatbot_llm_prompt_tokens.labels(method="answer").observe(response.usage.prompt_tokens)
-                chatbot_llm_completion_tokens.labels(method="answer").observe(response.usage.completion_tokens)
-            return response.choices[0].message.content.strip(), False
-        except Exception as exc:
-            is_error = True
-            return (
-                f"죄송합니다, 일시적인 오류가 발생했습니다. 상담사 연결을 원하시면 '상담사 연결'을 선택해 주세요. ({exc})",
-                True,
-            )
-        finally:
-            chatbot_llm_duration_seconds.labels(method="answer").observe(time.perf_counter() - start)
-            if is_error:
-                chatbot_llm_error_total.labels(method="answer").inc()
-
-    @observe(name="llm-recommend")
     def recommend(
         self,
         cash_flow: dict,
@@ -329,126 +319,322 @@ class LlmAdapter:
         user_query: str,
         history_ctx: str = "",
     ) -> str:
-        """현금흐름 분석 + 실제 상품 데이터 + 대화 이력 기반 개인화 추천 응답.
+        raise RuntimeError("상품 추천은 규칙 기반 추천 엔진에서만 처리합니다.")
 
-        Args:
-            cash_flow   : _analyze_customer_cash_flow() 반환값
-            products    : DB에서 조회한 판매 중인 수신 상품 목록
-            user_query  : 고객 질문 텍스트
-            history_ctx : _build_history_context() 반환값 (없으면 빈 문자열)
-        """
-        from langfuse.decorators import langfuse_context
-        langfuse_context.update_current_trace(
-            tags=["consultation-service"],
-            metadata={"service": "consultation-service"},
-        )
-        start = time.perf_counter()
-        is_error = False
-        try:
-            from langfuse.openai import OpenAI
-            client = OpenAI(api_key=self.api_key)
 
-            # ── 현금흐름 요약 텍스트 ─────────────────────────────────────────────
-            total_balance   = float(cash_flow.get("total_balance", 0))
-            monthly_surplus = float(cash_flow.get("monthly_surplus", 0))
-            tx_count        = float(cash_flow.get("monthly_tx_count", 0))
-            has_data        = cash_flow.get("has_data", False)
+class OpenAIDocumentAnalyzer:
+    """업로드된 문서(PDF 텍스트)를 분석하는 어댑터.
 
-            cf_text = (
-                f"- 총 잔액: {total_balance:,.0f}원\n"
-                f"- 월 평균 잉여자금(입금-출금): {monthly_surplus:,.0f}원\n"
-                f"- 월 평균 거래 건수: {tx_count:.1f}건"
-            ) if has_data else "거래 내역이 충분하지 않아 현금흐름 분석이 제한됩니다."
+    OpenAI API 키가 있으면 GPT를 사용하고, 없으면 룰 기반 분석으로 폴백한다.
+    """
 
-            # ── 상품 목록 텍스트 ─────────────────────────────────────────────────
-            product_lines = [
-                f"- {p.get('deposit_product_name') or p.get('product_name', '')} "
-                f"({p.get('deposit_product_type') or p.get('product_type', '')}) "
-                f"기본금리 {p.get('base_interest_rate', '')}%  "
-                f"가입금액 {p.get('min_join_amount', '')}~{p.get('max_join_amount', '')}원  "
-                f"{p.get('min_period_month', '')}~{p.get('max_period_month', '')}개월"
-                for p in products[:8]
-            ]
-            product_text = (
-                "\n".join(product_lines) if product_lines else "현재 판매 중인 수신 상품 없음"
-            )
+    _SYSTEM_PROMPTS: dict[str, str] = {
+        "CASH_FLOW": (
+            "당신은 은행 재무 상담사입니다. 고객이 제공한 타행 거래내역을 분석해 "
+            "월별 수입/지출 패턴, 주요 지출 카테고리, 저축 여력을 한국어로 요약해 주세요. "
+            "구체적인 수치와 함께 금융 상품 추천 포인트도 함께 제시해 주세요."
+        ),
+        "TERMS": (
+            "당신은 금융 약관 전문가입니다. 제공된 약관을 고객이 이해하기 쉽게 핵심 내용을 "
+            "한국어로 설명해 주세요. 특히 중도해지 조건, 수수료, 주의사항을 강조해 주세요."
+        ),
+        "PRODUCT": (
+            "당신은 은행 상품 전문가입니다. 제공된 상품 설명서를 바탕으로 금리 조건, "
+            "가입 조건, 해지 방법, 세제 혜택을 고객이 쉽게 이해할 수 있도록 한국어로 요약해 주세요."
+        ),
+    }
 
-            # ── 시스템 프롬프트 ──────────────────────────────────────────────────
-            system_prompt = (
-                "당신은 인터넷 뱅킹 개인 금융 상담 AI입니다.\n"
-                "고객의 현금흐름 데이터와 실제 판매 중인 수신 상품 정보를 바탕으로 "
-                "고객에게 가장 알맞은 금융 상품을 구체적으로 추천하세요.\n"
-                "규칙:\n"
-                "1. 추천 근거를 반드시 명시하세요 (잔액·잉여자금·거래 패턴과 연계)\n"
-                "2. 상품명과 금리는 구체적인 상품 추천 요청 시에만 언급하세요. "
-                "'예금과 적금 중 어느 게 맞나요?' 같은 **상품 유형 비교 질문**에는 상품명을 나열하지 말고 "
-                "예금/적금 중 어느 유형이 더 적합한지만 간결하게 답하세요.\n"
-                "3. '예금과 적금 중 나한테 적합한 거', '뭐가 더 나아?', '뭐가 더 적합해?' 같은 유형 비교 질문은 "
-                "반드시 예금 또는 적금 중 **하나의 유형만 선택**해서 이유와 함께 답하세요. "
-                "상품 목록 나열 금지. '둘 다 가능합니다' 절대 금지. "
-                "기준: 월 잉여자금 30만원 이상→적금, 잔액 1000만원 이상→예금, 둘 다면 적금 우선.\n"
-                "4. '하나만 추천해줘', '하나만 골라줘' 요청 시에만 구체적인 AXful 상품명을 추천하세요. 군인 전용(장병) 상품 추천 금지.\n"
-                "5. '둘 중', '어느 쪽이', '뭐가 더' 같은 후속 질문은 이전 대화 이력을 참고해 맥락을 파악하고 답변하세요\n"
-                "6. 거래 내역이 부족할 때도 질문 의도에 맞게 일반적인 기준으로 답변하세요\n"
-                "7. 고객이 대출·보험·펀드 등 수신 외 상품을 요청하면 "
-                "'해당 상품은 담당 창구 또는 앱에서 안내 가능합니다'라고 안내하세요\n"
-                "8. 답변은 한국어로, 친절하고 간결하게 (400자 이내)"
-            )
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini") -> None:
+        self._api_key = api_key
+        self._model = model
 
-            # ── 메시지 조립 ──────────────────────────────────────────────────────
-            context_parts = [
-                f"[고객 현금흐름 분석]\n{cf_text}",
-                f"[현재 판매 중인 수신 상품]\n{product_text}",
-            ]
-            if history_ctx:
-                context_parts.append(history_ctx)
+    def analyze(self, text: str, analyze_type: str) -> str:
+        if self._api_key:
+            try:
+                return self._analyze_with_openai(text, analyze_type)
+            except Exception:
+                pass
+        return self._analyze_rule_based(text, analyze_type)
 
-            llm_messages: list[dict] = [
+    def _analyze_with_openai(self, text: str, analyze_type: str) -> str:
+        from openai import OpenAI
+        system_prompt = self._SYSTEM_PROMPTS.get(analyze_type, self._SYSTEM_PROMPTS["TERMS"])
+        client = OpenAI(api_key=self._api_key)
+        resp = client.chat.completions.create(
+            model=self._model,
+            messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "system", "content": "\n\n".join(context_parts)},
-                {"role": "user",   "content": user_query or "내 현금 흐름에 맞는 상품을 추천해줘"},
+                {"role": "user", "content": f"다음 내용을 분석해 주세요:\n\n{text[:8000]}"},
+            ],
+            max_tokens=1000,
+        )
+        return resp.choices[0].message.content or "분석 결과를 가져올 수 없습니다."
+
+    def _analyze_rule_based(self, text: str, analyze_type: str) -> str:
+        import re
+
+        if analyze_type == "CASH_FLOW":
+            return self._analyze_cash_flow(text)
+        if analyze_type == "TERMS":
+            return self._analyze_terms(text)
+        if analyze_type == "PRODUCT":
+            return self._analyze_product(text)
+        return "분석 유형을 인식할 수 없습니다."
+
+    def _analyze_cash_flow(self, text: str) -> str:
+        import re
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+        # 금액 패턴: 숫자+원 혹은 쉼표 포함 숫자
+        amount_pattern = re.compile(r"([\+\-]?\d[\d,]*)\s*원?")
+
+        income_keywords = ["입금", "급여", "월급", "이자", "수입", "환급", "적립"]
+        expense_keywords = ["출금", "이체", "결제", "납부", "지출", "인출", "자동이체"]
+
+        income_total = 0
+        expense_total = 0
+        income_items: list[str] = []
+        expense_items: list[str] = []
+
+        for line in lines:
+            amounts = [int(m.group(1).replace(",", "")) for m in amount_pattern.finditer(line)]
+            if not amounts:
+                continue
+            amt = amounts[-1]
+            if any(k in line for k in income_keywords):
+                income_total += amt
+                if len(income_items) < 5:
+                    income_items.append(f"  • {line[:40]}")
+            elif any(k in line for k in expense_keywords):
+                expense_total += amt
+                if len(expense_items) < 5:
+                    expense_items.append(f"  • {line[:40]}")
+
+        surplus = income_total - expense_total
+        parts: list[str] = ["📊 **거래내역 분석 결과**\n"]
+        parts.append(f"💰 총 수입: {income_total:,}원")
+        if income_items:
+            parts.extend(income_items)
+        parts.append(f"\n💸 총 지출: {expense_total:,}원")
+        if expense_items:
+            parts.extend(expense_items)
+        parts.append(f"\n📈 월평균 잉여자금: {surplus:,}원")
+
+        if surplus > 500_000:
+            parts.append("\n✅ 잉여자금이 충분합니다. 정기적금이나 청약저축을 활용하면 목돈 마련에 유리합니다.")
+        elif surplus > 0:
+            parts.append("\n💡 소액 자동이체 적금으로 저축 습관을 만들어 보세요.")
+        else:
+            parts.append("\n⚠️ 지출이 수입을 초과하고 있습니다. 지출 항목 점검을 권장드립니다.")
+
+        if income_total == 0 and expense_total == 0:
+            parts = [
+                "📄 거래내역 파일을 확인했습니다.\n",
+                "수입·지출 금액을 자동으로 파악하기 어려운 형식입니다.\n",
+                "주요 내용을 직접 확인해 주세요:\n",
             ]
+            parts.extend(f"  • {l}" for l in lines[:10])
 
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=llm_messages,
-                max_tokens=600,
-                temperature=0.3,
-            )
-            if response.usage:
-                chatbot_llm_prompt_tokens.labels(method="recommend").observe(response.usage.prompt_tokens)
-                chatbot_llm_completion_tokens.labels(method="recommend").observe(response.usage.completion_tokens)
-            return response.choices[0].message.content.strip()
+        return "\n".join(parts)
 
-        except ImportError:
-            is_error = True
-            return (
-                "죄송합니다, AI 추천 서비스를 사용하려면 openai 패키지가 필요합니다. "
-                "상담사 연결을 원하시면 '상담사 연결'을 선택해 주세요."
-            )
-        except Exception:
-            is_error = True
-            # 구체적인 에러 메시지를 외부에 노출하지 않는다
-            return (
-                "죄송합니다, 상품 추천 중 일시적인 오류가 발생했습니다. "
-                "잠시 후 다시 시도하거나 '상담사 연결'을 선택해 주세요."
-            )
-        finally:
-            chatbot_llm_duration_seconds.labels(method="recommend").observe(time.perf_counter() - start)
-            if is_error:
-                chatbot_llm_error_total.labels(method="recommend").inc()
+    def _analyze_terms(self, text: str) -> str:
+        import re
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
 
+        # 조항 번호(제N조) 또는 숫자. 형태로 시작하는 줄 추출
+        article_pattern = re.compile(r"^(제\s*\d+\s*조|[\d]+\.)\s*(.+)")
+        articles: list[str] = []
+        for line in lines:
+            m = article_pattern.match(line)
+            if m:
+                articles.append(f"  • {m.group(0)[:60]}")
+            if len(articles) >= 10:
+                break
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 상담사 이관 fallback
-# ──────────────────────────────────────────────────────────────────────────────
+        # 키워드별 관련 문장 추출
+        highlights: dict[str, list[str]] = {
+            "중도해지": [],
+            "수수료": [],
+            "이자": [],
+            "만기": [],
+        }
+        for line in lines:
+            for keyword, bucket in highlights.items():
+                if keyword in line and len(bucket) < 2:
+                    bucket.append(line[:80])
+
+        parts = ["📋 **약관 분석 결과**\n"]
+
+        if articles:
+            parts.append("📌 주요 조항:")
+            parts.extend(articles)
+
+        for keyword, bucket in highlights.items():
+            if bucket:
+                parts.append(f"\n🔍 {keyword} 관련:")
+                parts.extend(f"  • {s}" for s in bucket)
+
+        if len(parts) == 1:
+            parts.append("약관 내용을 확인했습니다. 주요 내용:")
+            parts.extend(f"  • {l}" for l in lines[:8])
+
+        parts.append("\n⚠️ 중도해지 시 이자 손실이 발생할 수 있으니 가입 전 약관을 꼼꼼히 확인하세요.")
+        return "\n".join(parts)
+
+    def _analyze_product(self, text: str) -> str:
+        import re
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+        rate_pattern = re.compile(r"(\d+\.?\d*)\s*%")
+        amount_pattern = re.compile(r"(\d[\d,]*)\s*원")
+        period_pattern = re.compile(r"(\d+)\s*개월")
+
+        rates: list[str] = []
+        amounts: list[str] = []
+        periods: list[str] = []
+        features: list[str] = []
+
+        feature_keywords = ["세제", "비과세", "소득공제", "우대", "혜택", "특징", "조건", "가입대상", "만기"]
+
+        for line in lines:
+            if rate_pattern.search(line) and len(rates) < 4:
+                rates.append(f"  • {line[:70]}")
+            if amount_pattern.search(line) and len(amounts) < 3:
+                amounts.append(f"  • {line[:70]}")
+            if period_pattern.search(line) and len(periods) < 3:
+                periods.append(f"  • {line[:70]}")
+            if any(k in line for k in feature_keywords) and len(features) < 5:
+                features.append(f"  • {line[:70]}")
+
+        parts = ["📄 **상품 설명서 분석 결과**\n"]
+        if rates:
+            parts.append("💹 금리 조건:")
+            parts.extend(rates)
+        if amounts:
+            parts.append("\n💰 가입 금액:")
+            parts.extend(amounts)
+        if periods:
+            parts.append("\n📅 가입 기간:")
+            parts.extend(periods)
+        if features:
+            parts.append("\n✨ 주요 특징/혜택:")
+            parts.extend(features)
+
+        if len(parts) == 1:
+            parts.append("상품 설명서 내용을 확인했습니다. 주요 내용:")
+            parts.extend(f"  • {l}" for l in lines[:8])
+
+        parts.append("\n💡 자세한 가입 조건은 영업점 또는 고객센터에 문의하세요.")
+        return "\n".join(parts)
+
 
 class LlmHandoffAdapter:
     process_method_code = "BP002"
 
     def answer(self, message: str) -> str:
-        chatbot_fallback_total.inc()
+        try:
+            from app.metrics import chatbot_fallback_total
+            chatbot_fallback_total.inc()
+        except Exception:
+            pass
         return (
             "시나리오로 즉시 처리하기 어려운 문의입니다. "
-            "LLM 응답 검증 레이어가 연결되기 전까지는 상담사 연결을 권장합니다."
+            "상담사 연결을 이용해 주세요."
         )
+
+
+
+
+class RagAnswerGenerator:
+    """RAG 검색 결과 + 사용자 질문 → 자연어 답변 생성기.
+
+    OpenAI API 키가 있으면 GPT-4o-mini로 답변하고, 없으면 룰 기반으로 폴백한다.
+    """
+
+    _SYSTEM_PROMPT = (
+        "당신은 AXful Bank의 친절한 금융 상품 상담사입니다. "
+        "제공된 상품 정보를 근거로 고객 질문에 한국어로 답변해 주세요. "
+        "상품 정보에 없는 내용은 추측하지 말고 '확인이 필요합니다'라고 안내하세요. "
+        "답변은 간결하고 명확하게 작성하며, 필요시 불릿 포인트를 사용하세요."
+    )
+
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini") -> None:
+        self._api_key = api_key
+        self._model = model
+
+    def answer(self, query: str, rag_results: list[dict]) -> str:
+        if not rag_results:
+            return "현재 등록된 상품 정보 기준으로는 답변이 어렵습니다. 상담사 연결을 원하시면 '상담사 연결'을 선택해 주세요."
+
+        context = self._build_context(rag_results)
+
+        if self._api_key:
+            try:
+                return self._answer_with_openai(query, context)
+            except Exception:
+                pass
+
+        return self._answer_rule_based(query, rag_results)
+
+    def _build_context(self, rag_results: list[dict]) -> str:
+        lines = []
+        for i, r in enumerate(rag_results, 1):
+            doc_type = r.get("_type", "product")
+            if doc_type == "product":
+                name    = r.get("deposit_product_name") or r.get("product_name", "")
+                ptype   = r.get("deposit_product_type") or r.get("product_type", "")
+                ptype_ko = {"DEPOSIT": "예금", "SAVINGS": "적금", "SUBSCRIPTION": "청약"}.get(ptype, ptype)
+                rate    = r.get("base_interest_rate", "")
+                min_amt = r.get("min_join_amount", "")
+                max_amt = r.get("max_join_amount", "")
+                min_m   = r.get("min_period_month", "")
+                max_m   = r.get("max_period_month", "")
+                early   = "가능" if r.get("is_early_termination_allowed") else "불가"
+                tax     = "있음" if r.get("is_tax_benefit_available") else "없음"
+                desc    = r.get("description", "")
+                line = (
+                    f"[상품 {i}] {name} ({ptype_ko})\n"
+                    f"  - 기본금리: {rate}% | 가입금액: {min_amt}~{max_amt}원 | 기간: {min_m}~{max_m}개월\n"
+                    f"  - 중도해지: {early} | 세제혜택: {tax}"
+                )
+                if desc:
+                    line += f"\n  - 설명: {desc[:150]}"
+            else:
+                name    = r.get("special_term_name", "")
+                summary = r.get("special_term_summary", "") or r.get("special_term_content", "")[:150]
+                line    = f"[약관 {i}] {name}\n  - {summary}"
+            lines.append(line)
+        return "\n\n".join(lines)
+
+    def _answer_with_openai(self, query: str, context: str) -> str:
+        from openai import OpenAI
+        client = OpenAI(api_key=self._api_key)
+        resp = client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": self._SYSTEM_PROMPT},
+                {"role": "user", "content": f"[관련 상품 정보]\n{context}\n\n[고객 질문]\n{query}"},
+            ],
+            max_tokens=600,
+            temperature=0.3,
+        )
+        return resp.choices[0].message.content or "답변을 생성할 수 없습니다."
+
+    def _answer_rule_based(self, query: str, rag_results: list[dict]) -> str:
+        ptype_ko = {"DEPOSIT": "예금", "SAVINGS": "적금", "SUBSCRIPTION": "청약"}
+        lines = ["관련 상품 정보를 찾았습니다.\n"]
+        for r in rag_results[:3]:
+            doc_type = r.get("_type", "product")
+            if doc_type == "product":
+                name  = r.get("deposit_product_name") or r.get("product_name", "")
+                ptype = r.get("deposit_product_type") or r.get("product_type", "")
+                rate  = r.get("base_interest_rate", "")
+                min_m = r.get("min_period_month", "")
+                max_m = r.get("max_period_month", "")
+                lines.append(f"• {name} ({ptype_ko.get(ptype, ptype)}): 금리 {rate}%, 기간 {min_m}~{max_m}개월")
+            else:
+                name    = r.get("special_term_name", "")
+                summary = r.get("special_term_summary", "")
+                lines.append(f"• {name}: {summary[:80]}" if summary else f"• {name}")
+        lines.append("\n자세한 내용은 상담사 연결을 이용해 주세요.")
+        return "\n".join(lines)

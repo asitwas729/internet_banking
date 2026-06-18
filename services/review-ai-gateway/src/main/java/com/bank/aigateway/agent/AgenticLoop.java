@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -19,14 +20,14 @@ import java.util.function.Function;
  * Claude tool-use agentic loop.
  *
  * stop_reason=tool_use 응답 시 tool 실행 → tool_result 추가 → 재호출을 반복.
- * maxTurns 초과 시 INSUFFICIENT_DATA JSON 반환.
+ * maxTurns({@code aigateway.agent.max-turns}) 초과 시 INSUFFICIENT_DATA JSON 반환.
  */
 @Slf4j
 @Component
+@EnableConfigurationProperties(AgenticLoopProperties.class)
 @RequiredArgsConstructor
 public class AgenticLoop {
 
-    static final int MAX_TURNS = 5;
     static final String FALLBACK_JSON = """
             {
               "conclusion": "INSUFFICIENT_DATA",
@@ -37,6 +38,7 @@ public class AgenticLoop {
 
     private final ToolAwareLlmClient llmClient;
     private final ObjectMapper objectMapper;
+    private final AgenticLoopProperties loopProps;
 
     /**
      * @param systemPrompt  Claude system prompt
@@ -48,18 +50,19 @@ public class AgenticLoop {
                                  String userMessage,
                                  List<ToolDefinition> tools,
                                  Function<ToolCall, String> toolExecutor) {
+        int maxTurns = loopProps.maxTurns();
         ArrayNode messages = buildInitialMessages(userMessage);
         int totalInput  = 0;
         int totalOutput = 0;
 
-        for (int turn = 0; turn < MAX_TURNS; turn++) {
+        for (int turn = 0; turn < maxTurns; turn++) {
             ClaudeAgenticResponse resp = llmClient.completeWithTools(systemPrompt, messages, tools);
             totalInput  += resp.inputTokens();
             totalOutput += resp.outputTokens();
 
             if (resp.isEndTurn()) {
                 log.info("AgenticLoop 완료 — turns={} inputTokens={} outputTokens={}", turn + 1, totalInput, totalOutput);
-                return new AgenticLoopResult(resp.textContent(), totalInput, totalOutput, turn + 1);
+                return new AgenticLoopResult(resp.textContent(), totalInput, totalOutput, turn + 1, false);
             }
 
             if (resp.isToolUse()) {
@@ -68,8 +71,8 @@ public class AgenticLoop {
             }
         }
 
-        log.warn("AgenticLoop maxTurns({}) 초과 — INSUFFICIENT_DATA 반환", MAX_TURNS);
-        return new AgenticLoopResult(FALLBACK_JSON, totalInput, totalOutput, MAX_TURNS);
+        log.warn("AgenticLoop maxTurns({}) 초과 — INSUFFICIENT_DATA 반환", maxTurns);
+        return new AgenticLoopResult(FALLBACK_JSON, totalInput, totalOutput, maxTurns, true);
     }
 
     private ArrayNode buildInitialMessages(String userMessage) {

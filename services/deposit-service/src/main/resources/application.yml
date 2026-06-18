@@ -47,6 +47,8 @@ management:
       show-details: always
   metrics:
     distribution:
+      percentiles-histogram:
+        http.server.requests: true
       percentiles:
         http.server.requests: 0.5, 0.95, 0.99
     tags:
@@ -64,7 +66,13 @@ springdoc:
   packages-to-scan: com.bank.deposit
   default-produces-media-type: application/json
 
+client:
+  customer-service:
+    url: ${CUSTOMER_SERVICE_URL:http://customer-service:8081}
+
 logging:
+  file:
+    name: ${LOG_DIR:/logs}/deposit-service.log
   level:
     root: INFO
     org.springframework.web: INFO
