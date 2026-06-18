@@ -3,8 +3,8 @@ package com.bank.loan.advisory.rag;
 import com.bank.common.web.BusinessException;
 import com.bank.loan.support.LoanErrorCode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -19,13 +19,13 @@ import java.util.List;
 /**
  * OpenAI /v1/embeddings 어댑터.
  *
- * 활성 조건: advisory.rag.embed.provider=openai
+ * prod 기본 구현체 — test 프로파일에서는 StubEmbeddingClient 가 대신 로드됨.
  * 모델코드: OPENAI_3S (text-embedding-3-small, 1536 차원)
  */
 @Slf4j
 @Primary
 @Component
-@ConditionalOnProperty(name = "advisory.rag.embed.provider", havingValue = "openai")
+@Profile("!test")
 public class AdvisoryOpenAiEmbeddingClient implements EmbeddingClient {
 
     static final String MODEL_CD  = "OPENAI_3S";
