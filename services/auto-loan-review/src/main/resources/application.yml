@@ -10,6 +10,13 @@ spring:
     exclude:
       - org.springframework.ai.model.vertexai.autoconfigure.embedding.VertexAiTextEmbeddingAutoConfiguration
 
+  # ---- B5-2: Admin HTTP Basic 인증 ----
+  security:
+    user:
+      name: ${AI_ADMIN_USER:ai-admin}
+      password: ${AI_ADMIN_PASSWORD:dev-only-change-in-prod}
+      roles: AI_ADMIN
+
   # ---- PostgreSQL (B1 Audit Log) ----
   datasource:
     url: ${AI_DB_URL:jdbc:postgresql://localhost:5437/ai_db}

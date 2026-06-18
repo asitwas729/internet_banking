@@ -21,6 +21,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -29,7 +30,10 @@ import org.springframework.web.server.ResponseStatusException;
 @RequiredArgsConstructor
 public class AgentAdminService {
 
-    static final String ACTOR = "anonymous";   // 인증 도입(B5-2) 전 임시 식별자
+    private static String currentActor() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        return (auth != null && auth.isAuthenticated()) ? auth.getName() : "anonymous";
+    }
 
     private final AuditLogService auditLogService;
     private final AutoReviewService autoReviewService;
@@ -50,10 +54,10 @@ public class AgentAdminService {
             AgentAuditRecord record = auditLogService.findLatestByRevId(revId)
                     .orElseThrow(() -> new ResponseStatusException(
                             HttpStatus.NOT_FOUND, "감사 로그 없음 revId=" + revId));
-            actionAuditService.record(AdminActionAuditRecord.success(ACTOR, "QUERY_AUDIT_LOG", revId));
+            actionAuditService.record(AdminActionAuditRecord.success(currentActor(), "QUERY_AUDIT_LOG", revId));
             return record;
         } catch (ResponseStatusException e) {
-            actionAuditService.record(AdminActionAuditRecord.failure(ACTOR, "QUERY_AUDIT_LOG", revId, e.getReason()));
+            actionAuditService.record(AdminActionAuditRecord.failure(currentActor(), "QUERY_AUDIT_LOG", revId, e.getReason()));
             throw e;
         }
     }
@@ -92,19 +96,19 @@ public class AgentAdminService {
 
             log.info("dry-run replay revId={} track={} hashMatch={}", revId, decision.track(), hashMatch);
 
-            actionAuditService.record(AdminActionAuditRecord.success(ACTOR, "REPLAY_DRY_RUN", revId));
+            actionAuditService.record(AdminActionAuditRecord.success(currentActor(), "REPLAY_DRY_RUN", revId));
             return new ReplayDryRunResponse(revId, true, hashMatch,
                     record.inputHash(), replayedHash, replayedOpinion);
 
         } catch (ResponseStatusException e) {
-            actionAuditService.record(AdminActionAuditRecord.failure(ACTOR, "REPLAY_DRY_RUN", revId, e.getReason()));
+            actionAuditService.record(AdminActionAuditRecord.failure(currentActor(), "REPLAY_DRY_RUN", revId, e.getReason()));
             throw e;
         }
     }
 
     /** 에이전트 런타임 상태 스냅샷 반환. */
     public AgentStatusResponse buildStatus() {
-        actionAuditService.record(AdminActionAuditRecord.success(ACTOR, "QUERY_STATUS", null));
+        actionAuditService.record(AdminActionAuditRecord.success(currentActor(), "QUERY_STATUS", null));
         return new AgentStatusResponse(
                 agentProperties.enabled(),
                 rateMeter.getRpmRemaining(),
