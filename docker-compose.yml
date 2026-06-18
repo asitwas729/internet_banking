@@ -657,10 +657,10 @@ services:
     image: langfuse/langfuse:2
     container_name: ib-langfuse
     ports:
-      - "${LANGFUSE_PORT:-3001}:3000"
+      - "${LANGFUSE_PORT:-3002}:3000"
     environment:
       DATABASE_URL: postgresql://${LANGFUSE_DB_USER:-langfuse}:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-db:5432/${LANGFUSE_DB_NAME:-langfuse_db}
-      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3001}
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3002}
       NEXTAUTH_SECRET: ${LANGFUSE_SECRET:-langfuse-secret-change-in-prod}
       SALT: ${LANGFUSE_SALT:-langfuse-salt-change-in-prod}
       TELEMETRY_ENABLED: "false"
@@ -669,7 +669,7 @@ services:
       langfuse-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/public/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://$$(hostname -i):3000/api/public/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -790,7 +790,7 @@ services:
     cap_add:
       - IPC_LOCK
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8200/v1/sys/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8200/v1/sys/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
