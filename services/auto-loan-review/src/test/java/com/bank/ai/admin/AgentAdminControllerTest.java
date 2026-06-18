@@ -5,6 +5,9 @@ import com.bank.ai.agent.FallbackReason;
 import com.bank.ai.agent.RiskLevel;
 import com.bank.ai.audit.AgentAuditRecord;
 import com.bank.ai.admin.AgentStatusResponse;
+import com.bank.ai.drift.FairnessReport;
+import com.bank.ai.drift.PsiDriftReport;
+import com.bank.ai.drift.PsiStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.mockito.Mockito.when;
@@ -128,5 +132,51 @@ class AgentAdminControllerTest {
 
         mockMvc.perform(post("/admin/replay/303"))
                 .andExpect(status().isUnprocessableEntity());
+    }
+
+    // ── GET /admin/drift/psi ──────────────────────────────────────────────────
+
+    @Test
+    void getPsiReport_200과_피처별_PSI_반환() throws Exception {
+        var reports = List.of(
+                new PsiDriftReport("creditScore", 0.05, PsiStatus.STABLE, 120, "v1"));
+        when(adminService.getPsiReport()).thenReturn(reports);
+
+        mockMvc.perform(get("/admin/drift/psi"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].featureName").value("creditScore"))
+                .andExpect(jsonPath("$[0].status").value("STABLE"))
+                .andExpect(jsonPath("$[0].psiValue").value(0.05));
+    }
+
+    // ── GET /admin/drift/fairness ─────────────────────────────────────────────
+
+    @Test
+    void getFairnessReport_파라미터없이_200과_공정성_리포트_반환() throws Exception {
+        var reports = List.of(
+                new FairnessReport(LocalDate.of(2026, 5, 1), "AGE_20S",
+                        0.62, 80, 0.75, 0.13, true));
+        when(adminService.getFairnessReport(null)).thenReturn(reports);
+
+        mockMvc.perform(get("/admin/drift/fairness"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].groupKey").value("AGE_20S"))
+                .andExpect(jsonPath("$[0].flagged").value(true));
+    }
+
+    // ── GET /admin/shadow/diverged ────────────────────────────────────────────
+
+    @Test
+    void getShadowDiverged_파라미터없이_200과_divergence_통계_반환() throws Exception {
+        var response = new ShadowDivergedResponse(
+                3, 20, 0.85, 0.02,
+                LocalDate.of(2026, 6, 11), LocalDate.of(2026, 6, 18));
+        when(adminService.getShadowDiverged(null, null)).thenReturn(response);
+
+        mockMvc.perform(get("/admin/shadow/diverged"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.divergedCount").value(3))
+                .andExpect(jsonPath("$.totalCount").value(20))
+                .andExpect(jsonPath("$.agreementRate").value(0.85));
     }
 }

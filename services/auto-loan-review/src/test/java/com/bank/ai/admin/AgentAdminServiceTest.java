@@ -8,6 +8,11 @@ import com.bank.ai.audit.AgentAuditRecord;
 import com.bank.ai.audit.AuditLogProperties;
 import com.bank.ai.audit.AuditLogService;
 import com.bank.ai.drift.DriftProperties;
+import com.bank.ai.drift.FairnessReport;
+import com.bank.ai.drift.FairnessReportRepository;
+import com.bank.ai.drift.PsiDriftReport;
+import com.bank.ai.drift.PsiDriftResultRepository;
+import com.bank.ai.drift.PsiStatus;
 import com.bank.ai.llm.config.AgentProperties;
 import com.bank.ai.llm.config.LlmProperties;
 import com.bank.ai.llm.support.LlmRequestRateMeter;
@@ -17,6 +22,7 @@ import com.bank.ai.review.service.AutoReviewService;
 import com.bank.ai.rule.domain.Track;
 import com.bank.ai.rule.domain.TrackDecision;
 import com.bank.ai.rule.service.TrackClassifier;
+import com.bank.ai.shadow.ShadowResultRepository;
 import com.bank.ai.shadow.ShadowRunProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.bank.ai.admin.AgentStatusResponse;
@@ -32,6 +38,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -59,6 +66,9 @@ class AgentAdminServiceTest {
     @Mock AuditLogProperties auditLogProperties;
     @Mock ShadowRunProperties shadowRunProperties;
     @Mock DriftProperties driftProperties;
+    @Mock PsiDriftResultRepository psiDriftResultRepository;
+    @Mock FairnessReportRepository fairnessReportRepository;
+    @Mock ShadowResultRepository shadowResultRepository;
     @Spy  MeterRegistry meterRegistry = new SimpleMeterRegistry();
     @Spy  ObjectMapper objectMapper = new ObjectMapper();
 
@@ -198,6 +208,68 @@ class AgentAdminServiceTest {
 
         assertThat(result.inputHashMatch()).isFalse();
         assertThat(result.originalInputHash()).isNull();
+    }
+
+    // ── getPsiReport ─────────────────────────────────────────────────────────
+
+    @Test
+    void getPsiReport_피처목록_기반_최신PSI_반환() {
+        when(driftProperties.psiFeatures()).thenReturn(List.of("creditScore"));
+        when(driftProperties.modelVersion()).thenReturn("v1");
+        when(psiDriftResultRepository.findLatest("creditScore", "v1"))
+                .thenReturn(Optional.of(new PsiDriftReport("creditScore", 0.07, PsiStatus.STABLE, 100, "v1")));
+
+        List<PsiDriftReport> result = service.getPsiReport();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).featureName()).isEqualTo("creditScore");
+        assertThat(result.get(0).status()).isEqualTo(PsiStatus.STABLE);
+        verify(actionAuditService).record(
+                argThat(r -> "QUERY_PSI_REPORT".equals(r.action()) && "SUCCESS".equals(r.result())));
+    }
+
+    // ── getFairnessReport ─────────────────────────────────────────────────────
+
+    @Test
+    void getFairnessReport_월파라미터없이_지난달_조회() {
+        var report = new FairnessReport(
+                LocalDate.of(2026, 5, 1), "AGE_20S", 0.62, 80, 0.75, 0.13, true);
+        when(fairnessReportRepository.findFlaggedByMonth(any())).thenReturn(List.of(report));
+
+        List<FairnessReport> result = service.getFairnessReport(null);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).flagged()).isTrue();
+        verify(actionAuditService).record(
+                argThat(r -> "QUERY_FAIRNESS_REPORT".equals(r.action()) && "SUCCESS".equals(r.result())));
+    }
+
+    @Test
+    void getFairnessReport_월파라미터_지정시_해당월_조회() {
+        when(fairnessReportRepository.findFlaggedByMonth(LocalDate.of(2026, 4, 1)))
+                .thenReturn(List.of());
+
+        List<FairnessReport> result = service.getFairnessReport("2026-04");
+
+        assertThat(result).isEmpty();
+    }
+
+    // ── getShadowDiverged ────────────────────────────────────────────────────
+
+    @Test
+    void getShadowDiverged_파라미터없이_최근7일_통계_반환() {
+        when(shadowResultRepository.countDiverged(any(), any())).thenReturn(2);
+        when(shadowResultRepository.totalCount(any(), any())).thenReturn(10);
+        when(shadowResultRepository.agreementRate(any(), any())).thenReturn(0.80);
+        when(shadowResultRepository.citationMissRate(any(), any())).thenReturn(0.0);
+
+        ShadowDivergedResponse result = service.getShadowDiverged(null, null);
+
+        assertThat(result.divergedCount()).isEqualTo(2);
+        assertThat(result.totalCount()).isEqualTo(10);
+        assertThat(result.agreementRate()).isEqualTo(0.80);
+        verify(actionAuditService).record(
+                argThat(r -> "QUERY_SHADOW_DIVERGED".equals(r.action()) && "SUCCESS".equals(r.result())));
     }
 
     // ── 헬퍼 ─────────────────────────────────────────────────────────────────
