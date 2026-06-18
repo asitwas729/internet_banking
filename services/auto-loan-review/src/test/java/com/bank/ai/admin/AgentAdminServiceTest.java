@@ -272,6 +272,71 @@ class AgentAdminServiceTest {
                 argThat(r -> "QUERY_SHADOW_DIVERGED".equals(r.action()) && "SUCCESS".equals(r.result())));
     }
 
+    // ── regenerateOpinion ────────────────────────────────────────────────────
+
+    @Test
+    void regenerateOpinion_성공시_새_AgentOpinion_반환하고_감사기록() throws Exception {
+        String requestJson = "{\"age\":35,\"productCode\":\"MORT_001\"}";
+        var original = sampleRecord(501L, "TRACK_3", null);
+        when(auditLogService.findLatestByRevId(501L)).thenReturn(Optional.of(original));
+        when(autoReviewService.review(any())).thenReturn(
+                new AutoReviewResponse("stub-v1", "APPROVE", 0.9,
+                        Map.of("APPROVE", 0.9, "REJECT", 0.1), 0.10, "pd-v1"));
+        TrackDecision decision = new TrackDecision(
+                Track.TRACK_3, List.of(), 0.10, 0.9, 0.5, 0.3, "재생성");
+        when(trackClassifier.classify(any(), anyDouble(), any())).thenReturn(decision);
+        when(agentService.run(anyLong(), any(), any())).thenReturn(
+                AgentOpinion.of(0.9, 0.10, RiskLevel.LOW, List.of(), "재생성 요약", List.of(), false));
+        when(llmProperties.model()).thenReturn("stub-v1");
+        when(auditLogProperties.promptVersion()).thenReturn("v1");
+
+        AgentOpinion result = service.regenerateOpinion(501L, "이의신청");
+
+        assertThat(result.fallbackReason()).isNull();
+        verify(auditLogService).record(any());
+        verify(actionAuditService).record(
+                argThat(r -> "REGENERATE_OPINION".equals(r.action()) && "SUCCESS".equals(r.result())));
+    }
+
+    @Test
+    void regenerateOpinion_없는revId_404_그리고_FAILURE_감사기록() {
+        when(auditLogService.findLatestByRevId(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.regenerateOpinion(999L, "test"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                        .isEqualTo(HttpStatus.NOT_FOUND));
+        verify(actionAuditService).record(
+                argThat(r -> "REGENERATE_OPINION".equals(r.action()) && "FAILURE".equals(r.result())));
+    }
+
+    // ── toggleAgent ──────────────────────────────────────────────────────────
+
+    @Test
+    void toggleAgent_false로_설정_후_상태_반환() {
+        var result = service.toggleAgent(false);
+
+        assertThat(result.get("agentEnabled")).isEqualTo(false);
+        verify(actionAuditService).record(
+                argThat(r -> "TOGGLE_AGENT".equals(r.action()) && "SUCCESS".equals(r.result())));
+    }
+
+    // ── flushRateMeter ───────────────────────────────────────────────────────
+
+    @Test
+    void flushRateMeter_rateMeter_flush_호출_후_잔여슬롯_반환() {
+        when(rateMeter.getRpmRemaining()).thenReturn(15);
+        when(rateMeter.getRpdRemaining()).thenReturn(1500);
+
+        var result = service.flushRateMeter();
+
+        verify(rateMeter).flush();
+        assertThat(result.get("rpmRemaining")).isEqualTo(15);
+        assertThat(result.get("rpdRemaining")).isEqualTo(1500);
+        verify(actionAuditService).record(
+                argThat(r -> "FLUSH_RATE_METER".equals(r.action()) && "SUCCESS".equals(r.result())));
+    }
+
     // ── 헬퍼 ─────────────────────────────────────────────────────────────────
 
     private static AgentAuditRecord sampleRecord(Long revId, String track, String fallbackReason) {

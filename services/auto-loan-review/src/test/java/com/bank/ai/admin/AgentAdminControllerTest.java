@@ -179,4 +179,63 @@ class AgentAdminControllerTest {
                 .andExpect(jsonPath("$.totalCount").value(20))
                 .andExpect(jsonPath("$.agreementRate").value(0.85));
     }
+
+    // ── POST /admin/replay/{revId}/regenerate ─────────────────────────────────
+
+    @Test
+    void regenerate_존재하는revId_200과_AgentOpinion_반환() throws Exception {
+        AgentOpinion opinion = AgentOpinion.of(
+                0.80, 0.10, RiskLevel.LOW, List.of(), "재생성 요약", List.of(), false);
+        when(adminService.regenerateOpinion(1L, "이의신청 처리")).thenReturn(opinion);
+
+        mockMvc.perform(post("/admin/replay/1/regenerate")
+                        .contentType("application/json")
+                        .content("{\"reason\":\"이의신청 처리\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.risk_level").value("LOW"));
+    }
+
+    @Test
+    void regenerate_reason_누락시_400() throws Exception {
+        mockMvc.perform(post("/admin/replay/1/regenerate")
+                        .contentType("application/json")
+                        .content("{\"reason\":\"\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void regenerate_없는revId_404() throws Exception {
+        when(adminService.regenerateOpinion(999L, "test"))
+                .thenThrow(new ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "not found"));
+
+        mockMvc.perform(post("/admin/replay/999/regenerate")
+                        .contentType("application/json")
+                        .content("{\"reason\":\"test\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    // ── POST /admin/toggle ────────────────────────────────────────────────────
+
+    @Test
+    void toggle_enabled_false_200() throws Exception {
+        when(adminService.toggleAgent(false))
+                .thenReturn(java.util.Map.of("agentEnabled", false));
+
+        mockMvc.perform(post("/admin/toggle").param("enabled", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.agentEnabled").value(false));
+    }
+
+    // ── POST /admin/rate-meter/flush ──────────────────────────────────────────
+
+    @Test
+    void flushRateMeter_200과_잔여_슬롯_반환() throws Exception {
+        when(adminService.flushRateMeter())
+                .thenReturn(java.util.Map.of("rpmRemaining", 15, "rpdRemaining", 1500));
+
+        mockMvc.perform(post("/admin/rate-meter/flush"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rpmRemaining").value(15));
+    }
 }
