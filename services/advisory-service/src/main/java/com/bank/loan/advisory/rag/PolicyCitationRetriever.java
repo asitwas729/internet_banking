@@ -9,7 +9,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -59,8 +58,11 @@ public class PolicyCitationRetriever {
      * @param topK        반환할 최대 청크 수
      * @param requestedBy 요청자 ID
      * @return 유사도 내림차순 정렬된 인용 목록
+     *
+     * <p>AI_GUIDELINES: 트랜잭션 안에서 외부 API 호출 금지 → 메서드 레벨 트랜잭션을 두지 않는다.
+     * embed/조회는 트랜잭션 밖에서 수행되고, 감사 로그 save 는 {@link #appendLog} 호출 시
+     * Spring Data 가 각자 트랜잭션을 열어 best-effort 로 적재한다.
      */
-    @Transactional
     public PolicyCitationResponse retrieve(Long advrId, String ruleCd,
                                            String queryText, int topK, Long requestedBy) {
         Timer.Sample sample = advisoryMetrics.startRagSearchTimer();

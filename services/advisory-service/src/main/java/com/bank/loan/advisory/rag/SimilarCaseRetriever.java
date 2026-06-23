@@ -15,7 +15,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -27,6 +26,10 @@ import java.util.List;
  *
  * advisory_case_index 테이블을 직접 쿼리한다 (ai-service 위임 보류).
  * 자기 자신(revId 일치) 제외 후 결과 반환.
+ *
+ * <p>AI_GUIDELINES: 트랜잭션 안에서 외부 API 호출 금지 → retrieve 에 메서드 레벨 트랜잭션을
+ * 두지 않는다. embed/조회는 트랜잭션 밖에서 수행되고, 감사 로그 save 는 Spring Data 가
+ * 각자 트랜잭션을 열어 best-effort 로 적재한다.
  */
 @Slf4j
 @Service
@@ -54,12 +57,10 @@ public class SimilarCaseRetriever {
     private final AdvisoryRetrievalLogRepository logRepo;
     private final AdvisoryMetrics                advisoryMetrics;
 
-    @Transactional
     public SimilarCaseResponse retrieve(Long advrId, Long actorId) {
         return retrieve(advrId, DEFAULT_TOP_K, actorId);
     }
 
-    @Transactional
     public SimilarCaseResponse retrieve(Long advrId, int topK, Long actorId) {
         Timer.Sample sample = advisoryMetrics.startRagSearchTimer();
         boolean success = false;
