@@ -195,6 +195,22 @@ class CaseIndexBackfillServiceTest {
         verify(advisoryMetrics, never()).incrementBackfillFailed();
     }
 
+    @Test
+    void dryRun_시_기존_레코드도_skipped_메트릭_미발행() {
+        // 이미 인덱스에 존재하는 레코드 — 실제 실행이면 skipped 메트릭이 오르지만 dryRun 은 미발행
+        LoanReview review = stubReview(51L, "APPROVED");
+        when(reviewRepo.findByRevStatusCdAndDeletedAtIsNull(anyString(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(review)))
+                .thenReturn(new PageImpl<>(List.of()));
+        when(caseIndexRepo.existsByRevId(51L)).thenReturn(true);
+
+        var result = service.backfill(null, null, true, 99L);
+
+        assertThat(result.skipped()).isEqualTo(1);
+        verify(advisoryMetrics, never()).incrementBackfillSkipped();
+        verify(advisoryMetrics, never()).incrementBackfillProcessed();
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────
 
     private LoanReview stubReview(Long revId, String decisionCd) {
