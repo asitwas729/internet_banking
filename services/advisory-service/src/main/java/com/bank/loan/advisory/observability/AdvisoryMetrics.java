@@ -130,6 +130,7 @@ public class AdvisoryMetrics {
         sample.stop(Timer.builder(M_RAG_EMBEDDING_DURATION)
                 .tag("model", model)
                 .tag("status", status)
+                .publishPercentileHistogram()
                 .description("Advisory RAG 임베딩 API 호출 지연시간")
                 .register(meterRegistry));
         meterRegistry.counter(M_RAG_EMBEDDING_CALLS, "model", model, "status", status).increment();
