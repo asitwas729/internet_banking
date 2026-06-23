@@ -75,10 +75,14 @@ public class CaseIndexBackfillService {
                 // 멱등: 이미 동일 revId 가 인덱스에 있으면 건너뜀
                 if (caseIndexRepo.existsByRevId(revId)) {
                     skipped++;
-                    advisoryMetrics.incrementBackfillSkipped();
+                    // dryRun 은 진단 실행 — 운영 카운터를 오염시키지 않도록 메트릭 미기록
+                    if (!dryRun) {
+                        advisoryMetrics.incrementBackfillSkipped();
+                    }
                     continue;
                 }
 
+                // dryRun 은 대상 건수만 카운트 (임베딩·INSERT·메트릭 모두 생략)
                 if (dryRun) {
                     processed++;
                     continue;
