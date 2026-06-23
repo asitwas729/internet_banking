@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import (
     average_precision_score,
     brier_score_loss,
@@ -99,6 +100,8 @@ class HmdaTrainResult:
     holdout: HmdaEvalResult
     valid: HmdaEvalResult
     best_params: dict[str, Any] | None = None
+    calibrator: IsotonicRegression | None = None
+    holdout_raw: HmdaEvalResult | None = None
 
 
 def build_lgbm_dataset(
@@ -137,15 +140,47 @@ def _threshold_at_f1_max(y_true: np.ndarray, y_score: np.ndarray) -> float:
     return best_t
 
 
+def calibrate_isotonic(
+    booster,
+    valid_df: pd.DataFrame,
+    schema: FeatureSchema,
+) -> IsotonicRegression:
+    """valid 셋에서 raw score → calibrated probability 단조 매핑 학습.
+
+    out_of_bounds='clip' 으로 학습 범위 밖 점수도 [0,1] 로 안전 클립.
+    """
+    X = prepare_features(valid_df, schema)
+    y = prepare_hmda_labels(valid_df).to_numpy()
+    raw = booster.predict(X, num_iteration=booster.best_iteration)
+    calibrator = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
+    calibrator.fit(raw, y)
+    return calibrator
+
+
+def calibrator_to_dict(calibrator: IsotonicRegression) -> dict[str, Any]:
+    """IsotonicRegression 을 보간 knot(x/y) 로 직렬화 — 언어 중립 추론용."""
+    return {
+        "type": "isotonic",
+        "x_thresholds": [float(x) for x in calibrator.X_thresholds_],
+        "y_thresholds": [float(y) for y in calibrator.y_thresholds_],
+    }
+
+
 def evaluate_booster(
     booster,
     df: pd.DataFrame,
     schema: FeatureSchema,
+    calibrator: IsotonicRegression | None = None,
 ) -> HmdaEvalResult:
-    """AUC-ROC, KS, PR-AUC, Brier, threshold@F1-max 산출."""
+    """AUC-ROC, KS, PR-AUC, Brier, threshold@F1-max 산출.
+
+    calibrator 가 주어지면 raw score 에 적용 후 산출(AUC/KS 는 단조변환에 불변, Brier 개선).
+    """
     X = prepare_features(df, schema)
     y = prepare_hmda_labels(df).to_numpy()
     score = booster.predict(X, num_iteration=booster.best_iteration)
+    if calibrator is not None:
+        score = calibrator.predict(score)
     return HmdaEvalResult(
         auc=float(roc_auc_score(y, score)),
         ks=_ks_statistic(y, score),
@@ -234,8 +269,12 @@ def train_hmda(
     config: HmdaTrainConfig | None = None,
     tune: bool = False,
     n_trials: int = 20,
+    calibrate: bool = True,
 ) -> HmdaTrainResult:
-    """HMDA 학습 엔드투엔드. tune=True 면 Optuna 로 config 덮어씀."""
+    """HMDA 학습 엔드투엔드. tune=True 면 Optuna 로 config 덮어씀.
+
+    calibrate=True 면 valid 셋으로 isotonic calibrator 를 학습해 holdout 평가에 적용.
+    """
     schema = fit_categories(splits.train, hmda_feature_schema())
     log.info("fit_categories: %s", {k: len(v) for k, v in schema.category_codes.items()})
 
@@ -255,10 +294,14 @@ def train_hmda(
         )
 
     booster = train_booster(splits, schema, config)
-    valid_eval = evaluate_booster(booster, splits.valid, schema)
-    holdout_eval = evaluate_booster(booster, splits.holdout, schema)
+
+    calibrator = calibrate_isotonic(booster, splits.valid, schema) if calibrate else None
+    holdout_raw = evaluate_booster(booster, splits.holdout, schema)
+    valid_eval = evaluate_booster(booster, splits.valid, schema, calibrator)
+    holdout_eval = evaluate_booster(booster, splits.holdout, schema, calibrator)
     log.info("valid:   AUC=%.4f KS=%.4f", valid_eval.auc, valid_eval.ks)
-    log.info("holdout: AUC=%.4f KS=%.4f", holdout_eval.auc, holdout_eval.ks)
+    log.info("holdout: AUC=%.4f KS=%.4f brier_raw=%.4f brier_cal=%.4f",
+             holdout_eval.auc, holdout_eval.ks, holdout_raw.brier, holdout_eval.brier)
 
     return HmdaTrainResult(
         booster=booster,
@@ -268,4 +311,6 @@ def train_hmda(
         holdout=holdout_eval,
         valid=valid_eval,
         best_params=best_params,
+        calibrator=calibrator,
+        holdout_raw=holdout_raw,
     )
