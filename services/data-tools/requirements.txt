@@ -9,3 +9,6 @@ scipy>=1.13
 scikit-learn>=1.5
 lightgbm>=4.0
 optuna>=3.6
+onnx>=1.16
+onnxmltools>=1.12
+onnxruntime>=1.18
