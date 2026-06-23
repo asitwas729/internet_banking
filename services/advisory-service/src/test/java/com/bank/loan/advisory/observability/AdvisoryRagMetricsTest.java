@@ -4,6 +4,8 @@ import com.bank.loan.advisory.repository.ReviewAdvisoryReportRepository;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -126,5 +128,20 @@ class AdvisoryRagMetricsTest {
 
         assertThat(successCount).isEqualTo(2.0);
         assertThat(errorCount).isEqualTo(1.0);
+    }
+
+    @Test
+    void 임베딩_타이머_percentile_histogram_bucket_발행() {
+        // publishPercentileHistogram() 가 있어야 Prometheus 스크레이프에 _bucket 시계열이 노출된다.
+        // AdvisoryRagEmbeddingLatencySlow alert 의 histogram_quantile(..._bucket..) 가 이에 의존.
+        PrometheusMeterRegistry promRegistry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        ReviewAdvisoryReportRepository mockRepo = mock(ReviewAdvisoryReportRepository.class);
+        when(mockRepo.countOpenBySeverity(anyString())).thenReturn(0L);
+        AdvisoryMetrics promMetrics = new AdvisoryMetrics(promRegistry, mockRepo);
+
+        promMetrics.recordRagEmbeddingDuration(promMetrics.startRagEmbeddingTimer(), "OPENAI_3S", "success");
+
+        assertThat(promRegistry.scrape())
+                .contains("advisory_rag_embedding_duration_seconds_bucket");
     }
 }
