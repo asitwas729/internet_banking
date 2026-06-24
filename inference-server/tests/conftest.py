@@ -29,7 +29,10 @@ _PNUM = ["age", "employment_years", "n_children", "income_quintile", "annual_inc
          "total_asset_kw", "total_debt_kw", "collateral_debt_kw", "credit_debt_kw",
          "monthly_cashflow_mean_kw", "monthly_cashflow_std_kw", "requested_amount_kw",
          "requested_period_mo", "region_risk_band", "bureau_n_active",
-         "bureau_overdue_amt_kw", "bureau_max_status_24m"]
+         "bureau_overdue_amt_kw", "bureau_max_status_24m", "bureau_overdue_cnt",
+         "bureau_active_ratio", "past_loan_dpd_mean", "past_loan_dpd_max",
+         "past_loan_pay_ratio", "prev_app_refused_ratio",
+         "ext_credit_score_2", "ext_credit_score_3"]
 
 
 def _mk_hmda(n, seed):
@@ -130,7 +133,9 @@ def make_client(bundles, monkeypatch):
         if with_pd:
             monkeypatch.setenv("PD_MODEL_DIR", pd_dir)
         else:
-            monkeypatch.delenv("PD_MODEL_DIR", raising=False)
+            # 디스크의 실 data/models/homecredit_kr_v1 자동 탐색을 막기 위해
+            # 존재하지 않는 경로를 명시(삭제만 하면 fallback 탐색이 실모델을 찾음).
+            monkeypatch.setenv("PD_MODEL_DIR", str(Path(pd_dir).parent / "__no_pd__"))
         monkeypatch.setenv("SHAP_TOP_K", str(shap_top_k))
         monkeypatch.setenv("SHAP_BG_N", "60")
         _stub_routers()

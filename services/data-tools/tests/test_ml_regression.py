@@ -39,7 +39,10 @@ _PNUM = ["age", "employment_years", "n_children", "income_quintile", "annual_inc
          "total_asset_kw", "total_debt_kw", "collateral_debt_kw", "credit_debt_kw",
          "monthly_cashflow_mean_kw", "monthly_cashflow_std_kw", "requested_amount_kw",
          "requested_period_mo", "region_risk_band", "bureau_n_active",
-         "bureau_overdue_amt_kw", "bureau_max_status_24m"]
+         "bureau_overdue_amt_kw", "bureau_max_status_24m", "bureau_overdue_cnt",
+         "bureau_active_ratio", "past_loan_dpd_mean", "past_loan_dpd_max",
+         "past_loan_pay_ratio", "prev_app_refused_ratio",
+         "ext_credit_score_2", "ext_credit_score_3"]
 
 
 def _mk_hmda(n, seed):
