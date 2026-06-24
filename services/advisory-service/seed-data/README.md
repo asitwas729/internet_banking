@@ -52,6 +52,25 @@ python data-tools/scripts/seed_advisory_rag.py --seed-dir services/advisory-serv
 
 멱등 보장: 동일 `doc_cd` + `doc_version` 조합은 재실행 시 건너뜀(409 응답 = NO-OP).
 
+## 재인입 (청크 설정 변경 후)
+
+청크 크기·overlap 등 청킹 설정을 바꾸면(예: 800/100 → 1000/50, `docs/plan/16_chunk_size_eval.md`)
+기존 임베딩이 무효화되므로 **재청킹·재임베딩**이 필요하다. 멱등 스킵을 우회하는 `--force` 로 교체 재인입한다.
+
+```bash
+# 1) 교체 재인입: 동일 doc_cd/version 의 기존 청크 삭제 + 문서 소프트삭제 후 새 설정으로 재청킹
+python data-tools/scripts/seed_advisory_rag.py --force
+
+# (서버측: POST /api/internal/advisory/documents?replace=true 로 전송)
+
+# 2) IVFFlat lists 재산정 — 청크 수가 바뀌었으므로 실측 rows 기준 재인덱싱
+curl -X POST http://localhost:8080/api/internal/advisory/rag/reindex
+```
+
+- `--force` 없이 재실행하면 기존과 동일하게 409 SKIP.
+- 사례 인덱스(`advisory_case_index`)는 청크가 아니라 심사 요약 1건 임베딩이라 청크 설정 변경의 영향을 받지
+  않는다(재인입 불필요). 모델 교체 시에만 `POST /rag/case-index/backfill` 로 재적재.
+
 ## dev용 seed_hmda_rag.py 와의 관계
 
 `data-tools/scripts/seed_hmda_rag.py` 는 이 디렉토리의 문서 5건을 인라인 데이터로 포함하는 구버전 스크립트.
