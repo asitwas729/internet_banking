@@ -20,6 +20,59 @@ log = logging.getLogger(__name__)
 DEFAULT_MODELS_DIR = PROJECT_ROOT / "data" / "models"
 
 
+def save_onnx_bundle(
+    model_dir: Path,
+    booster,
+    schema: FeatureSchema,
+    train_df,
+    *,
+    model_version: str,
+    holdout_metrics: dict,
+    calibrator_json: dict | None = None,
+    extra_meta: dict | None = None,
+    shap_n: int = 500,
+    seed: int = 42,
+) -> Path:
+    """LightGBM booster → ONNX 추론 번들 저장.
+
+    산출물: model.lgb, model.onnx, feature_schema.json, calibrator.json(선택),
+    metadata.json, shap_background.parquet, train_reference.parquet.
+    inference-server OnnxModelBundle 이 이 디렉터리를 그대로 로드한다.
+    """
+    from .onnx_export import export_lgbm_to_onnx
+    from .shap_background import build_shap_background
+
+    model_dir = Path(model_dir)
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    booster.save_model(str(model_dir / "model.lgb"))
+    export_lgbm_to_onnx(booster, schema, model_dir / "model.onnx")
+    (model_dir / "feature_schema.json").write_text(
+        json.dumps(schema.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    if calibrator_json is not None:
+        (model_dir / "calibrator.json").write_text(
+            json.dumps(calibrator_json, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    meta = {
+        "model_version": model_version,
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "framework": "lightgbm-onnx",
+        "n_features": len(schema.all_features),
+        "holdout": holdout_metrics,
+    }
+    if extra_meta:
+        meta.update(extra_meta)
+    (model_dir / "metadata.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    build_shap_background(train_df, schema, n=shap_n, seed=seed).to_parquet(
+        model_dir / "shap_background.parquet")
+    train_df.to_parquet(model_dir / "train_reference.parquet")
+
+    log.info("ONNX bundle saved: %s", model_dir)
+    return model_dir
+
+
 def model_dir(version: str) -> Path:
     return DEFAULT_MODELS_DIR / f"auto_review_{version}"
 
