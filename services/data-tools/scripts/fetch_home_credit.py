@@ -34,6 +34,8 @@ BASE = PROJECT_ROOT / "data" / "external" / "credit" / "home-credit-default"
 FILES = {
     "application_train.csv": "application_train",
     "bureau.csv": "bureau",
+    "installments_payments.csv": "installments_payments",
+    "previous_application.csv": "previous_application",
 }
 
 
@@ -54,6 +56,10 @@ def fetch(log: logging.Logger) -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         for csv_name, subdir in FILES.items():
+            out_path = BASE / subdir / f"{subdir}.parquet"
+            if out_path.exists():
+                log.info("skip %s (exists: %s)", csv_name, out_path)
+                continue
             log.info("downloading %s ...", csv_name)
             csv_path = _download_file(csv_name, tmp)
             df = pd.read_csv(csv_path)

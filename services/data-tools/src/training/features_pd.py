@@ -39,12 +39,20 @@ PD_NUMERIC: list[str] = [
     "monthly_cashflow_std_kw",
     "delinquency_history_24m",
     "credit_score_proxy",
+    "ext_credit_score_2",
+    "ext_credit_score_3",
     "requested_amount_kw",
     "requested_period_mo",
     "region_risk_band",
     "bureau_n_active",
     "bureau_overdue_amt_kw",
     "bureau_max_status_24m",
+    "bureau_overdue_cnt",
+    "bureau_active_ratio",
+    "past_loan_dpd_mean",
+    "past_loan_dpd_max",
+    "past_loan_pay_ratio",
+    "prev_app_refused_ratio",
 ]
 
 PD_BOOLEAN: list[str] = [

@@ -71,13 +71,39 @@ def build_pd_dataset(seed: int = 42, sample: int | None = None) -> pd.DataFrame:
         bureau_n_active=("CREDIT_ACTIVE", lambda s: int((s == "Active").sum())),
         bureau_overdue_amt=("AMT_CREDIT_SUM_OVERDUE", "sum"),
         bureau_max_status=("CREDIT_DAY_OVERDUE", "max"),
+        bureau_overdue_cnt=("CREDIT_DAY_OVERDUE", lambda s: int((s > 0).sum())),
         bureau_cnt=("SK_ID_BUREAU", "size"),
     )
     df = app.merge(bagg, on="SK_ID_CURR", how="left")
 
+    # installments_payments — 과거 대출 상환 연체일(DPD) + 상환비율 (Home Credit 최강 신호)
+    inst = pd.read_parquet(
+        BASE / "installments_payments" / "installments_payments.parquet",
+        columns=["SK_ID_CURR", "DAYS_INSTALMENT", "DAYS_ENTRY_PAYMENT",
+                 "AMT_INSTALMENT", "AMT_PAYMENT"])
+    inst["dpd"] = (inst["DAYS_ENTRY_PAYMENT"] - inst["DAYS_INSTALMENT"]).clip(lower=0)
+    inst["pay_ratio"] = (inst["AMT_PAYMENT"] / inst["AMT_INSTALMENT"].replace(0, np.nan)).clip(0, 2)
+    iagg = inst.groupby("SK_ID_CURR").agg(
+        past_loan_dpd_mean=("dpd", "mean"),
+        past_loan_dpd_max=("dpd", "max"),
+        past_loan_pay_ratio=("pay_ratio", "mean"),
+    )
+    df = df.merge(iagg, on="SK_ID_CURR", how="left")
+
+    # previous_application — 과거 신청 거절 비율
+    prev = pd.read_parquet(
+        BASE / "previous_application" / "previous_application.parquet",
+        columns=["SK_ID_CURR", "NAME_CONTRACT_STATUS"])
+    pagg = prev.groupby("SK_ID_CURR").agg(
+        prev_app_refused_ratio=("NAME_CONTRACT_STATUS", lambda s: float((s == "Refused").mean())),
+    )
+    df = df.merge(pagg, on="SK_ID_CURR", how="left")
+
     inc = df["AMT_INCOME_TOTAL"].clip(lower=1)
-    ext = df[["EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3"]].mean(axis=1)
-    ext = ext.fillna(ext.mean())
+    # EXT_SOURCE 3종을 분리 유지 — 평균 시 신호 손실 (Kaggle 최상위 피처).
+    ext1 = df["EXT_SOURCE_1"].fillna(df["EXT_SOURCE_1"].mean())
+    ext2 = df["EXT_SOURCE_2"].fillna(df["EXT_SOURCE_2"].mean())
+    ext3 = df["EXT_SOURCE_3"].fillna(df["EXT_SOURCE_3"].mean())
     age = (-df["DAYS_BIRTH"] / 365).astype(int)
     emp = (-df["DAYS_EMPLOYED"] / 365).where(df["DAYS_EMPLOYED"] < 0, 0).clip(0, 50).fillna(0)
     goods = df["AMT_GOODS_PRICE"].replace(0, np.nan)
@@ -114,12 +140,22 @@ def build_pd_dataset(seed: int = 42, sample: int | None = None) -> pd.DataFrame:
     out["monthly_cashflow_std_kw"] = (out["monthly_cashflow_mean_kw"] * 0.2).astype(int)
     out["requested_period_mo"] = (df["AMT_CREDIT"] / df["AMT_ANNUITY"].replace(0, np.nan) * 12
                                   ).clip(6, 360).fillna(36).astype(int)
-    out["credit_score_proxy"] = (300 + ext * 650).clip(300, 950).astype(int)
+    out["credit_score_proxy"] = (300 + ext1 * 650).clip(300, 950).astype(int)
+    out["ext_credit_score_2"] = ext2.clip(0, 1).round(6)
+    out["ext_credit_score_3"] = ext3.clip(0, 1).round(6)
     out["region_risk_band"] = df["REGION_RATING_CLIENT"].fillna(2).astype(int)
     out["bureau_n_active"] = df["bureau_n_active"].fillna(0).astype(int)
     out["bureau_overdue_amt_kw"] = (df["bureau_overdue_amt"].fillna(0) / 10_000).clip(0).astype(int)
     out["bureau_max_status_24m"] = df["bureau_max_status"].fillna(0).clip(0, 12).astype(int)
+    out["bureau_overdue_cnt"] = df["bureau_overdue_cnt"].fillna(0).astype(int)
+    bureau_cnt = df["bureau_cnt"].fillna(0)
+    out["bureau_active_ratio"] = (df["bureau_n_active"].fillna(0) / bureau_cnt.replace(0, np.nan)
+                                  ).fillna(0.0).clip(0, 1).round(4)
     out["delinquency_history_24m"] = (df["bureau_max_status"].fillna(0) > 0).astype(int)
+    out["past_loan_dpd_mean"] = df["past_loan_dpd_mean"].fillna(0.0).round(3)
+    out["past_loan_dpd_max"] = df["past_loan_dpd_max"].fillna(0.0).round(1)
+    out["past_loan_pay_ratio"] = df["past_loan_pay_ratio"].fillna(1.0).clip(0, 2).round(4)
+    out["prev_app_refused_ratio"] = df["prev_app_refused_ratio"].fillna(0.0).round(4)
     # ── boolean ──
     out["purpose_red_flag"] = False
     out["bureau_has_record"] = df["bureau_cnt"].fillna(0) > 0
