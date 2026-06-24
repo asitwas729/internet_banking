@@ -93,11 +93,18 @@ class PdPredictResponse(BaseModel):
     predictions: list[PdPrediction]
 
 
+class ModelHealth(BaseModel):
+    loaded: bool
+    n_features: int | None = None
+    auc: float | None = None
+    gini: float | None = None
+    ks: float | None = None
+
+
 class HealthResponse(BaseModel):
     model_config = {"protected_namespaces": ()}
     status: str
-    model_version: str
-    n_features: int | None = None
+    models: dict[str, ModelHealth]
 
 
 # --- App lifecycle --------------------------------------------------------
@@ -158,14 +165,29 @@ def _check_batch(req: PredictRequest) -> None:
         raise HTTPException(status_code=413, detail=f"batch > MAX_BATCH_SIZE({MAX_BATCH_SIZE})")
 
 
+def _model_health(bundle: OnnxModelBundle | None) -> ModelHealth:
+    if bundle is None:
+        return ModelHealth(loaded=False)
+    meta = bundle.metadata
+    holdout = meta.get("holdout") or meta.get("holdout_metrics") or {}
+    metrics: dict[str, float] = {}
+    for key in ("auc", "gini", "ks"):
+        val = holdout.get(key, meta.get(key))
+        if val is not None:
+            metrics[key] = float(val)
+    return ModelHealth(loaded=True, n_features=len(bundle.schema.all_features), **metrics)
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    if _bundle is None:
-        raise HTTPException(status_code=503, detail="model not loaded")
+    decision_key = _bundle.model_id if _bundle is not None else MODEL_ID
+    pd_key = _pd_bundle.model_id if _pd_bundle is not None else PD_MODEL_ID
     return HealthResponse(
-        status="UP",
-        model_version=_bundle.model_id,
-        n_features=len(_bundle.schema.all_features),
+        status="UP" if _bundle is not None else "DOWN",
+        models={
+            decision_key: _model_health(_bundle),
+            pd_key: _model_health(_pd_bundle),
+        },
     )
 
 
