@@ -30,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -121,5 +122,38 @@ class DocumentIngestionServiceTest {
         service.registerFile(req(null), "scan".getBytes(), "scan.pdf", 9L);
 
         verify(jdbcTemplate, atLeastOnce()).update(anyString(), any(Object[].class));
+    }
+
+    @Test
+    void replace_true_면_기존_문서_청크삭제_소프트삭제_후_재인입() {
+        AdvisoryDocument existing = AdvisoryDocument.builder()
+                .docId(7L).docCd("DSR_1").docVersion("v1").docCategoryCd("CREDIT_POLICY")
+                .docTitle("기존").activeYn("Y").build();
+        when(docRepo.findByDocCdAndDocVersionAndDeletedAtIsNull("DSR_1", "v1"))
+                .thenReturn(Optional.of(existing));
+
+        service.register(req("교체 본문"), 9L, true);
+
+        // 기존 청크 하드삭제 + 문서 소프트삭제(flush)
+        verify(jdbcTemplate).update(eq("DELETE FROM advisory_document_chunk WHERE doc_id = ?"), eq(7L));
+        verify(docRepo).saveAndFlush(existing);
+        assertThat(existing.isDeleted()).isTrue();
+        // 신규 INSERT 도 수행
+        verify(jdbcTemplate, atLeastOnce()).update(
+                org.mockito.ArgumentMatchers.contains("INSERT INTO advisory_document_chunk"),
+                any(Object[].class));
+    }
+
+    @Test
+    void replace_false_면_기존_문서_충돌_LOAN_001() {
+        AdvisoryDocument existing = AdvisoryDocument.builder()
+                .docId(7L).docCd("DSR_1").docVersion("v1").build();
+        when(docRepo.findByDocCdAndDocVersionAndDeletedAtIsNull("DSR_1", "v1"))
+                .thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.register(req("본문"), 9L, false))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(LoanErrorCode.LOAN_001);
     }
 }
