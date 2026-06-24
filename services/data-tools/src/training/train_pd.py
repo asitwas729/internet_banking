@@ -14,6 +14,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.stats import ks_2samp
+from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, brier_score_loss, f1_score, roc_auc_score
 
 from .dataset import Splits
@@ -86,6 +88,17 @@ class PdEvalResult:
         }
 
 
+class PlattCalibrator:
+    """1D 로지스틱(Platt) 스케일러 — IsotonicRegression 과 동일한 predict 인터페이스."""
+
+    def __init__(self, lr: LogisticRegression) -> None:
+        self._lr = lr
+
+    def predict(self, score) -> np.ndarray:
+        x = np.asarray(score, dtype=float).reshape(-1, 1)
+        return self._lr.predict_proba(x)[:, 1]
+
+
 @dataclass
 class PdTrainResult:
     booster: Any  # lightgbm.Booster
@@ -96,6 +109,8 @@ class PdTrainResult:
     valid: PdEvalResult
     best_params: dict[str, Any] | None = None
     desired_positive_rate: float = 0.03
+    calibrator: Any = None
+    holdout_raw: PdEvalResult | None = None
 
 
 def apply_class_weight(
@@ -195,6 +210,53 @@ def evaluate_pd(
     )
 
 
+def calibrate_pd(
+    booster,
+    valid_df: pd.DataFrame,
+    schema: FeatureSchema,
+    target_base_rate: float = 0.02,
+):
+    """valid 셋 isotonic / Platt 중 Brier 낮은 쪽 선택.
+
+    valid 는 reweight 되지 않아 양성률이 원본(~8%) 이므로, calibrator fit 시
+    target_base_rate 로 sample reweighting 해 출력 분포를 한국 추정 디폴트율로 이동.
+    """
+    X = prepare_features(valid_df, schema)
+    y = prepare_pd_labels(valid_df).to_numpy()
+    raw = booster.predict(X, num_iteration=booster.best_iteration)
+    w = apply_class_weight(valid_df, desired_positive_rate=target_base_rate).to_numpy()
+
+    iso = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
+    iso.fit(raw, y, sample_weight=w)
+    platt = PlattCalibrator(
+        LogisticRegression(max_iter=1000).fit(raw.reshape(-1, 1), y, sample_weight=w)
+    )
+
+    b_iso = brier_score_loss(y, iso.predict(raw), sample_weight=w)
+    b_platt = brier_score_loss(y, platt.predict(raw), sample_weight=w)
+    chosen, name = (iso, "isotonic") if b_iso <= b_platt else (platt, "platt")
+    log.info("calibrate_pd: weighted brier iso=%.5f platt=%.5f -> %s", b_iso, b_platt, name)
+    return chosen
+
+
+def pd_calibrator_to_dict(calibrator) -> dict[str, Any]:
+    """isotonic/Platt calibrator 직렬화 — 언어중립 추론용."""
+    if isinstance(calibrator, IsotonicRegression):
+        return {
+            "type": "isotonic",
+            "x_thresholds": [float(x) for x in calibrator.X_thresholds_],
+            "y_thresholds": [float(y) for y in calibrator.y_thresholds_],
+        }
+    if isinstance(calibrator, PlattCalibrator):
+        lr = calibrator._lr
+        return {
+            "type": "platt",
+            "coef": float(lr.coef_.ravel()[0]),
+            "intercept": float(lr.intercept_.ravel()[0]),
+        }
+    raise TypeError(f"unsupported calibrator: {type(calibrator)}")
+
+
 def train_pd_booster(
     splits: Splits,
     schema: FeatureSchema,
@@ -279,8 +341,12 @@ def train_pd(
     n_trials: int = 25,
     reweight: bool = True,
     desired_positive_rate: float = 0.03,
+    calibrate: bool = True,
 ) -> PdTrainResult:
-    """PD 학습 엔드투엔드. reweight=True 면 Kamiran sample weight 로 base rate 보정."""
+    """PD 학습 엔드투엔드. reweight=True 면 Kamiran sample weight 로 base rate 보정.
+
+    calibrate=True 면 valid 셋으로 isotonic/Platt calibrator 를 학습해 holdout 평가에 적용.
+    """
     schema = fit_categories(splits.train, pd_feature_schema())
     log.info("fit_categories: %s", {k: len(v) for k, v in schema.category_codes.items()})
 
@@ -306,11 +372,18 @@ def train_pd(
         )
 
     booster = train_pd_booster(splits, schema, config, weight)
-    valid_eval = evaluate_pd(booster, splits.valid, schema)
-    holdout_eval = evaluate_pd(booster, splits.holdout, schema)
+
+    calibrator = (
+        calibrate_pd(booster, splits.valid, schema, target_base_rate=desired_positive_rate)
+        if calibrate else None
+    )
+    holdout_raw = evaluate_pd(booster, splits.holdout, schema)
+    valid_eval = evaluate_pd(booster, splits.valid, schema, calibrator)
+    holdout_eval = evaluate_pd(booster, splits.holdout, schema, calibrator)
     log.info("valid:   AUC=%.4f Gini=%.4f KS=%.4f", valid_eval.auc, valid_eval.gini, valid_eval.ks)
-    log.info("holdout: AUC=%.4f Gini=%.4f KS=%.4f lift1=%.2f",
-             holdout_eval.auc, holdout_eval.gini, holdout_eval.ks, holdout_eval.lift_decile1)
+    log.info("holdout: AUC=%.4f Gini=%.4f KS=%.4f lift1=%.2f pd_thr=%.4f",
+             holdout_eval.auc, holdout_eval.gini, holdout_eval.ks,
+             holdout_eval.lift_decile1, holdout_eval.pd_threshold)
 
     return PdTrainResult(
         booster=booster,
@@ -321,4 +394,6 @@ def train_pd(
         valid=valid_eval,
         best_params=best_params,
         desired_positive_rate=desired_positive_rate,
+        calibrator=calibrator,
+        holdout_raw=holdout_raw,
     )
