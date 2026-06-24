@@ -278,6 +278,22 @@ class ChunkSizeRetrievalEvalTest {
     // OpenAI 호출
     // ──────────────────────────────────────────────────────────────────────
 
+    /** 일시적 5xx·연결 오류는 백오프 재시도(OpenAI upstream 종료 대비). */
+    static JsonNode callJson(RestClient client, String uri, Object body) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            try {
+                return client.post().uri(uri).body(body).retrieve().body(JsonNode.class);
+            } catch (org.springframework.web.client.HttpServerErrorException
+                     | org.springframework.web.client.ResourceAccessException e) {
+                last = e;
+                try { Thread.sleep(1500L * attempt); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            }
+        }
+        throw last;
+    }
+
     static RestClient openai() {
         return RestClient.builder()
                 .baseUrl("https://api.openai.com")
@@ -291,9 +307,8 @@ class ChunkSizeRetrievalEvalTest {
         final int batch = 96;
         for (int from = 0; from < texts.size(); from += batch) {
             List<String> slice = texts.subList(from, Math.min(from + batch, texts.size()));
-            JsonNode resp = client.post().uri("/v1/embeddings")
-                    .body(Map.of("model", EMBED_MODEL, "input", slice))
-                    .retrieve().body(JsonNode.class);
+            JsonNode resp = callJson(client, "/v1/embeddings",
+                    Map.of("model", EMBED_MODEL, "input", slice));
             JsonNode data = resp.get("data");
             for (JsonNode item : data) {
                 int index = item.get("index").asInt();
@@ -310,14 +325,12 @@ class ChunkSizeRetrievalEvalTest {
         RestClient client = openai();
         String sys = "다음 API 명세 섹션 내용을 보고, 그 섹션이 답이 되는 한국어 자연어 질문 한 개만 만들어라. "
                 + "헤딩이나 경로를 그대로 베끼지 말고 사용자가 실제로 물을 법한 문장으로. 질문만 출력.";
-        JsonNode resp = client.post().uri("/v1/chat/completions")
-                .body(Map.of(
-                        "model", GEN_MODEL,
-                        "temperature", 0,
-                        "messages", List.of(
-                                Map.of("role", "system", "content", sys),
-                                Map.of("role", "user", "content", sectionBody))))
-                .retrieve().body(JsonNode.class);
+        JsonNode resp = callJson(client, "/v1/chat/completions", Map.of(
+                "model", GEN_MODEL,
+                "temperature", 0,
+                "messages", List.of(
+                        Map.of("role", "system", "content", sys),
+                        Map.of("role", "user", "content", sectionBody))));
         return resp.get("choices").get(0).get("message").get("content").asText();
     }
 

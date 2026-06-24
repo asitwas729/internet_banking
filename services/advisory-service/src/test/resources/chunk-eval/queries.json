@@ -1,14 +1,151 @@
-[
-  { "query": "판매 중인 대출 상품 목록을 받아오려면 어떤 엔드포인트를 호출하나", "section": "`GET` `/api/loan-products`" },
-  { "query": "특정 상품의 우대금리 정책 목록은 어떻게 조회하나", "section": "`GET` `/api/loan-products/{prodId}/preferential-rate-policies`" },
-  { "query": "대출 신청 단건 상세 정보를 조회하는 방법", "section": "`GET` `/api/loan-applications/{applId}`" },
-  { "query": "신용정보 조회 보고서를 생성하는 요청은 무엇인가", "section": "`POST` `/api/loan-contracts/{cntrId}/credit-info-reports`" },
-  { "query": "본인확인 검증 결과 단건을 조회하려면", "section": "`GET` `/api/loan-applications/{applId}/identity-verifications/{idvId}`" },
-  { "query": "대출 신청 건의 심사를 요청하는 API", "section": "`POST` `/api/loan-applications/{applId}/review`" },
-  { "query": "대출 신청에 담보를 등록하는 엔드포인트", "section": "`POST` `/api/loan-applications/{applId}/collaterals`" },
-  { "query": "대출 신청 서류를 업로드하는 방법", "section": "`POST` `/api/loan-applications/{applId}/documents`" },
-  { "query": "온라인으로 상환을 처리하는 요청", "section": "`POST` `/api/loan-contracts/{cntrId}/repayments/online`" },
-  { "query": "대출 계약 증명서를 발급·조회하는 API", "section": "`GET` `/api/loan-contracts/{cntrId}/certificates`" },
-  { "query": "특정 날짜가 영업일인지 확인하는 엔드포인트", "section": "`GET` `/api/business-calendar/check`" },
-  { "query": "월말 마감 배치를 수동으로 실행하는 내부 API", "section": "`POST` `/api/internal/eom/run`" }
-]
+[ {
+  "section" : "`GET` `/api/loan-products`",
+  "query" : "대출 상품 정보를 가져오려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-products`",
+  "query" : "대출 상품을 생성하기 위해 어떤 필드와 제약 조건이 필요한가요?"
+}, {
+  "section" : "`GET` `/api/loan-products/{prodId}`",
+  "query" : "특정 대출 상품의 상세 정보를 얻으려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`PATCH` `/api/loan-products/{prodId}`",
+  "query" : "대출 상품 정보를 수정하려면 어떤 요청을 보내야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-products/{prodId}/discontinue`",
+  "query" : "대출 상품을 중단하려면 어떤 정보를 요청해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-products/{prodId}/preferential-rate-policies`",
+  "query" : "특정 대출 상품의 우대 금리 정책을 조회하려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-products/{prodId}/preferential-rate-policies`",
+  "query" : "대출 상품의 우대 금리 정책을 생성하려면 어떤 정보를 요청 본문에 포함해야 하나요?"
+}, {
+  "section" : "`POST` `/api/internal/application-expiry/run`",
+  "query" : "승인 만료 일배치를 트리거하기 위해 어떤 정보를 제공해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/credit-consents`",
+  "query" : "대출 신청에 대한 신용 동의를 생성하려면 어떤 정보를 요청해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-applications`",
+  "query" : "대출 신청 정보를 조회할 때 어떤 쿼리 파라미터를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications`",
+  "query" : "대출 신청을 하려면 어떤 정보가 필요하고, 요청을 어떻게 보내야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-applications/{applId}`",
+  "query" : "특정 대출 신청의 상세 정보를 조회하려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/cancel`",
+  "query" : "대출 신청을 취소할 때 필요한 요청 본문은 어떤 형식이어야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-applications/{applId}/journey`",
+  "query" : "특정 대출 신청의 진행 상황을 확인하려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-applications/{applId}/prescreening`",
+  "query" : "대출 신청 ID로 사전 심사 결과를 조회하려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/prescreening`",
+  "query" : "대출 신청의 사전 심사를 위해 어떤 정보를 요청해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-applications/{applId}/credit-evaluation`",
+  "query" : "특정 대출 신청의 신용 평가 결과를 확인하려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/credit-evaluation`",
+  "query" : "신용 평가를 요청할 때 필요한 정보는 무엇인가요?"
+}, {
+  "section" : "`GET` `/api/loan-contracts/{cntrId}/credit-info-reports`",
+  "query" : "특정 대출 계약의 신용 정보 보고서를 가져오려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-contracts/{cntrId}/credit-info-reports`",
+  "query" : "대출 계약 ID에 대한 신용 정보 보고서를 제출하려면 어떤 정보를 요청 본문에 포함해야 하나요?"
+}, {
+  "section" : "`GET` `/api/credit-info-reports`",
+  "query" : "신고 ID를 사용해서 특정 신용 정보 보고서를 조회하려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`GET` `/api/credit-info-reports/{crptId}`",
+  "query" : "특정 신용 정보 보고서를 조회하려면 어떤 경로를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/credit-info-reports/{crptId}/ack`",
+  "query" : "신용 정보 보고서의 확인 요청을 어떻게 보내야 하나요?"
+}, {
+  "section" : "`POST` `/api/credit-info-reports/{crptId}/retry`",
+  "query" : "신용 정보 보고서를 재시도하려면 어떤 정보를 제공해야 하나요?"
+}, {
+  "section" : "`POST` `/api/internal/credit-info-reports/dispatch`",
+  "query" : "신용 정보 보고서를 전송할 때 어떤 응답 데이터를 받을 수 있나요?"
+}, {
+  "section" : "`POST` `/api/credit-score/preview`",
+  "query" : "신용 점수를 미리 확인하기 위해 어떤 정보를 요청해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-applications/{applId}/dsr-calculation`",
+  "query" : "특정 대출 신청의 DSR 계산 결과를 얻으려면 어떤 API를 호출해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/dsr-calculation`",
+  "query" : "DSR 산정을 위해 어떤 정보를 요청 본문에 포함해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/identity-verifications`",
+  "query" : "대출 신청의 신원 확인을 위해 어떤 정보를 요청해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-applications/{applId}/identity-verifications/{idvId}`",
+  "query" : "특정 대출 신청의 신원 확인 정보를 조회하려면 어떤 경로를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loans/reviews/{revId}/bias-result`",
+  "query" : "대출 리뷰의 편향 검증 결과를 콜백으로 받으려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/internal/loan-reviews/expire-bias-reviewing`",
+  "query" : "대출 심사에서 특정 날짜 이전의 편향 리뷰를 만료시키는 API는 어떻게 사용하나요?"
+}, {
+  "section" : "`POST` `/api/internal/loan-reviews/expire-pending`",
+  "query" : "대출 리뷰의 만료를 처리하기 위해 어떤 요청을 보내야 하나요?"
+}, {
+  "section" : "`POST` `/api/internal/loan-reviews/expire-pending-approver`",
+  "query" : "대기 중인 승인자를 만료시키기 위해 어떤 파라미터를 사용해야 하나요?"
+}, {
+  "section" : "`POST` `/api/internal/loan-reviews/{revId}/bias-ops-note`",
+  "query" : "대출 리뷰에 대한 편향 작업 노트를 추가하려면 어떤 정보를 요청 본문에 포함해야 하나요?"
+}, {
+  "section" : "`POST` `/api/internal/loan-reviews/{revId}/bias-report`",
+  "query" : "대출 리뷰의 편향 보고서를 제출하려면 어떤 정보를 포함해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-reviews/{revId}/advices`",
+  "query" : "특정 대출 리뷰에 대한 조언을 얻으려면 어떤 API를 호출해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-reviews/{revId}/advisory-reports`",
+  "query" : "특정 대출 리뷰에 대한 자문 보고서를 어떻게 조회할 수 있나요?"
+}, {
+  "section" : "`POST` `/api/loan-reviews/{revId}/bias-override`",
+  "query" : "대출 리뷰의 편향을 무시하기 위해 어떤 정보를 요청해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-applications/{applId}/review`",
+  "query" : "특정 대출 신청서의 리뷰 정보를 어떻게 조회할 수 있나요?"
+}, {
+  "section" : "`PATCH` `/api/loan-applications/{applId}/review`",
+  "query" : "대출 신청서의 결정을 수정하려면 어떤 정보를 요청 본문에 포함해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/review`",
+  "query" : "대출 신청서의 본심사를 실행하기 위해 필요한 요청 본문은 어떤 필드로 구성되어 있나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/review/acknowledge-bias`",
+  "query" : "대출 신청의 편향을 인정하는 요청을 어떻게 보내나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/review/approver-approve`",
+  "query" : "대출 신청을 승인하기 위해 어떤 정보를 요청해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/review/auto-decide`",
+  "query" : "자동 심사를 요청할 때 필요한 정보는 무엇인가요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/review/confirm`",
+  "query" : "대출 신청의 본심사를 확정하기 위해 어떤 정보를 요청해야 하나요?"
+}, {
+  "section" : "`POST` `/api/loan-applications/{applId}/review/escalate-to-hq`",
+  "query" : "대출 신청을 본사에 상신하려면 어떤 권한이 필요하고, 요청 시 어떤 정보를 제공해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-reviews/escalated`",
+  "query" : "대출 리뷰 중에서 에스컬레이션된 항목을 조회하려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-reviews/pending`",
+  "query" : "대출 심사 대기 목록을 조회하려면 어떤 API를 사용해야 하나요?"
+}, {
+  "section" : "`GET` `/api/loan-reviews/pending-approver`",
+  "query" : "대기 중인 대출 심사 요청의 목록을 어떻게 조회할 수 있나요?"
+} ]
