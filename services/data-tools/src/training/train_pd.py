@@ -21,6 +21,7 @@ from sklearn.metrics import average_precision_score, brier_score_loss, f1_score,
 from .dataset import Splits
 from .features import FeatureSchema, fit_categories, prepare_features
 from .features_pd import PD_LABEL_COL, pd_feature_schema, prepare_pd_labels
+from .onnx_export import export_lgbm_to_onnx, onnx_smoke_check
 
 log = logging.getLogger(__name__)
 
@@ -255,6 +256,16 @@ def pd_calibrator_to_dict(calibrator) -> dict[str, Any]:
             "intercept": float(lr.intercept_.ravel()[0]),
         }
     raise TypeError(f"unsupported calibrator: {type(calibrator)}")
+
+
+def export_pd_onnx(booster, schema: FeatureSchema, out_path) -> Any:
+    """PD booster → ONNX. 출력 [N,2] 의 [:,1] = P(default). 일반 export 재사용."""
+    return export_lgbm_to_onnx(booster, schema, out_path)
+
+
+def pd_onnx_smoke_check(booster, onnx_path, df: pd.DataFrame, schema: FeatureSchema, atol: float = 1e-4) -> float:
+    """LightGBM vs ONNX P(default) 최대 절대차. atol 초과 시 ValueError."""
+    return onnx_smoke_check(booster, onnx_path, df, schema, atol=atol)
 
 
 def train_pd_booster(
