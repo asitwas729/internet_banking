@@ -12,3 +12,4 @@ optuna>=3.6
 onnx>=1.16
 onnxmltools>=1.12
 onnxruntime>=1.18
+datasets>=2.20
