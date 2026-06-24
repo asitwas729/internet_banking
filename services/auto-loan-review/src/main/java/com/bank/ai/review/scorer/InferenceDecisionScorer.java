@@ -38,7 +38,7 @@ public class InferenceDecisionScorer implements DecisionScorer {
     @Override
     public AutoReviewResponse score(AutoReviewRequest req) {
         Map<String, Object> features = toFeatureMap(req);
-        InferenceRequest payload = new InferenceRequest(List.of(features));
+        InferenceRequest payload = InferenceRequest.of(List.of(features));
 
         InferenceResponse decisionRes = inferenceClient.predict(payload);
         if (decisionRes == null || decisionRes.predictions() == null || decisionRes.predictions().isEmpty()) {
