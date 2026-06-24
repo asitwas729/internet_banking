@@ -205,9 +205,11 @@ app = FastAPI(title="auto-review inference", version="1.0.0")
 from app.ocr_router import router as ocr_router            # noqa: E402
 from app.extract_router import router as extract_router    # noqa: E402
 from app.forgery_router import router as forgery_router    # noqa: E402
+from app.parse_router import router as parse_router        # noqa: E402
 app.include_router(ocr_router)
 app.include_router(extract_router)
 app.include_router(forgery_router)
+app.include_router(parse_router)
 
 _PD_DEFAULT_THRESHOLD = 0.12
 

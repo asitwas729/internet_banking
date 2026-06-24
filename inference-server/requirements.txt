@@ -11,3 +11,10 @@ opencv-python-headless>=4.10.0
 # OCR — CPU 환경 설치 (GPU 없으면 paddlepaddle-cpu 사용)
 paddlepaddle==2.6.2; sys_platform != "unsupported"
 paddleocr>=2.8.1; sys_platform != "unsupported"
+# 규정문서 파싱(/parse/document) — PDF/DOCX/HWPX 구조 추출
+PyMuPDF>=1.24.0
+pdfplumber>=0.11.0
+python-docx>=1.1.0
+lxml>=5.0.0
+pyhwp>=0.1b15
+# 바이너리 HWP 변환 폴백은 LibreOffice(soffice) + H2Orestart 확장이 이미지에 설치돼야 함(런타임 CLI)
