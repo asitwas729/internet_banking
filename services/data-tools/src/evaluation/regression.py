@@ -6,14 +6,18 @@ CI 에서 `pytest -m ml_regression` 으로 호출.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import pandas as pd
 from scipy.stats import ks_2samp
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import brier_score_loss, roc_auc_score
+
+from training.onnx_export import to_numeric_matrix
 
 log = logging.getLogger(__name__)
 
@@ -195,3 +199,154 @@ def check_approval_parity(
             max_group=max_group,
         )
     return out
+
+
+def _lift_decile1(y_true: np.ndarray, score: np.ndarray) -> float:
+    overall = float(y_true.mean())
+    if overall == 0.0:
+        return 0.0
+    k = max(1, int(len(score) * 0.1))
+    top_idx = np.argsort(score)[::-1][:k]
+    return float(y_true[top_idx].mean()) / overall
+
+
+def _apply_calibrator(calib: dict, raw: np.ndarray) -> np.ndarray:
+    if calib.get("type") == "platt":
+        z = calib["coef"] * raw + calib["intercept"]
+        return 1.0 / (1.0 + np.exp(-z))
+    x = np.asarray(calib.get("x_thresholds", calib.get("X_thresholds")), dtype=float)
+    y = np.asarray(calib.get("y_thresholds", calib.get("Y_thresholds")), dtype=float)
+    return np.interp(raw, x, y)
+
+
+def _onnx_positive_proba(model_path: Path, matrix: np.ndarray) -> np.ndarray:
+    import onnxruntime as ort
+
+    sess = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+    inp = sess.get_inputs()[0].name
+    outputs = sess.run(None, {inp: matrix})
+    for arr in outputs:
+        a = np.asarray(arr)
+        if a.ndim == 2 and a.shape[1] == 2:
+            return a[:, 1]
+    return np.asarray(outputs[-1]).ravel()
+
+
+@dataclass
+class RegressionReport:
+    model_id: str
+    auc_roc: float
+    gini: float
+    ks: float
+    brier: float
+    fourfiths_sex: float | None
+    fourfiths_age_band: float | None
+    fourfiths_segment: float | None
+    lift_decile1: float
+    passed: bool
+    thresholds: dict = field(default_factory=dict)
+    failures: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "model_id": self.model_id,
+            "auc_roc": round(self.auc_roc, 6),
+            "gini": round(self.gini, 6),
+            "ks": round(self.ks, 6),
+            "brier": round(self.brier, 6),
+            "fourfiths_sex": self.fourfiths_sex,
+            "fourfiths_age_band": self.fourfiths_age_band,
+            "fourfiths_segment": self.fourfiths_segment,
+            "lift_decile1": round(self.lift_decile1, 6),
+            "passed": self.passed,
+            "thresholds": self.thresholds,
+            "failures": self.failures,
+        }
+
+    def to_json(self, path: Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def run_regression_check(
+    model_dir: Path,
+    holdout_parquet: Path,
+    schema,
+    thresholds: dict[str, float],
+    *,
+    label_fn: Callable[[pd.DataFrame], np.ndarray],
+    decision_threshold: float = 0.5,
+    group_cols: tuple[str, ...] = ("sex", "age_band", "applicant_segment"),
+    out_path: Path | None = None,
+) -> RegressionReport:
+    """ONNX 모델 holdout 추론 → 지표 산출 → thresholds 비교 → RegressionReport.
+
+    label_fn: holdout DataFrame → 이진 라벨(0/1) 배열. thresholds 키:
+    auc/gini/ks/fourfiths/lift_decile1 (존재하는 키만 검사).
+    """
+    model_dir = Path(model_dir)
+    holdout = pd.read_parquet(holdout_parquet)
+    y = np.asarray(label_fn(holdout))
+
+    matrix = to_numeric_matrix(holdout, schema)
+    proba = _onnx_positive_proba(model_dir / "model.onnx", matrix)
+    calib_path = model_dir / "calibrator.json"
+    if calib_path.exists():
+        proba = _apply_calibrator(json.loads(calib_path.read_text(encoding="utf-8")), proba)
+
+    auc = float(roc_auc_score(y, proba))
+    gini = 2.0 * auc - 1.0
+    ks = _ks_statistic(y, proba)
+    brier = float(brier_score_loss(y, proba))
+    lift = _lift_decile1(y, proba)
+
+    y_pred = (proba >= decision_threshold).astype(int)
+    gdf = pd.DataFrame(index=holdout.index)
+    if "sex" in holdout.columns:
+        gdf["sex"] = holdout["sex"]
+    if "age" in holdout.columns:
+        gdf["age_band"] = holdout["age"].map(to_age_band)
+    if "applicant_segment" in holdout.columns:
+        gdf["applicant_segment"] = holdout["applicant_segment"]
+    present = [c for c in group_cols if c in gdf.columns]
+    parity = check_approval_parity(y_pred, gdf, group_cols=present,
+                                   min_ratio=thresholds.get("fourfiths", 0.80)) if present else {}
+
+    def _ratio(col: str) -> float | None:
+        return parity[col].ratio if col in parity else None
+
+    model_id = model_dir.name
+
+    failures: list[str] = []
+    if "auc" in thresholds and auc < thresholds["auc"]:
+        failures.append(f"auc {auc:.4f} < {thresholds['auc']}")
+    if "gini" in thresholds and gini < thresholds["gini"]:
+        failures.append(f"gini {gini:.4f} < {thresholds['gini']}")
+    if "ks" in thresholds and ks < thresholds["ks"]:
+        failures.append(f"ks {ks:.4f} < {thresholds['ks']}")
+    if "lift_decile1" in thresholds and lift < thresholds["lift_decile1"]:
+        failures.append(f"lift_decile1 {lift:.4f} < {thresholds['lift_decile1']}")
+    ff_min = thresholds.get("fourfiths", 0.80)
+    for col, res in parity.items():
+        if not res.passed:
+            failures.append(f"4/5ths {col} {res.ratio:.4f} < {ff_min}")
+
+    report = RegressionReport(
+        model_id=model_id,
+        auc_roc=auc,
+        gini=gini,
+        ks=ks,
+        brier=brier,
+        fourfiths_sex=_ratio("sex"),
+        fourfiths_age_band=_ratio("age_band"),
+        fourfiths_segment=_ratio("applicant_segment"),
+        lift_decile1=lift,
+        passed=not failures,
+        thresholds=dict(thresholds),
+        failures=failures,
+    )
+    if out_path is not None:
+        report.to_json(out_path)
+        log.info("regression report saved: %s (passed=%s)", out_path, report.passed)
+    return report
