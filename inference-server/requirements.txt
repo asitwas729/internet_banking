@@ -6,6 +6,7 @@ xgboost>=2.1
 numpy>=1.26
 onnxruntime>=1.18
 pyarrow>=15.0
+shapiq>=1.2
 Pillow>=10.0
 ollama>=0.3.0
 pikepdf>=9.0.0
