@@ -15,6 +15,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.feature_prep import dataframe_to_matrix
+
 log = logging.getLogger("inference")
 
 ONNX_INPUT_NAME = "input"
@@ -109,22 +111,8 @@ class OnnxModelBundle:
                  self.model_id, self.calibrator is not None, self.background_df is not None)
 
     def to_matrix(self, df: pd.DataFrame) -> np.ndarray:
-        """dict DataFrame → ONNX 입력 float 행렬. categorical=code, 누락 컬럼 안전 처리."""
-        n = len(df)
-        cols: list[np.ndarray] = []
-        for col in self.schema.categorical:
-            series = (df[col].astype("string") if col in df.columns
-                      else pd.Series([None] * n, dtype="string"))
-            codes = self.schema.category_codes.get(col)
-            cat = pd.Categorical(series, categories=codes)
-            cols.append(cat.codes.astype("float32"))
-        for col in self.schema.numeric:
-            val = df[col] if col in df.columns else pd.Series([np.nan] * n)
-            cols.append(pd.to_numeric(val, errors="coerce").astype("float32").to_numpy())
-        for col in self.schema.boolean:
-            val = df[col] if col in df.columns else pd.Series([False] * n)
-            cols.append(val.fillna(False).astype("int8").astype("float32").to_numpy())
-        return np.column_stack(cols).astype(np.float32)
+        """dict DataFrame → ONNX 입력 float 행렬 (feature_prep 위임)."""
+        return dataframe_to_matrix(df, self.schema)
 
     def _onnx_proba(self, matrix: np.ndarray) -> np.ndarray:
         """ONNX 출력에서 [N, n_classes] 확률 행렬 추출."""
