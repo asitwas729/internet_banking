@@ -1,5 +1,6 @@
 package com.bank.ai.review.scorer;
 
+import com.bank.ai.review.client.FeatureMapper;
 import com.bank.ai.review.client.InferenceClient;
 import com.bank.ai.review.client.dto.InferenceRequest;
 import com.bank.ai.review.client.dto.InferenceResponse;
@@ -13,9 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * inference-server(Python/XGBoost) HTTP 호출 스코어러.
@@ -34,11 +33,11 @@ public class InferenceDecisionScorer implements DecisionScorer {
     private static final String POSITIVE_CLASS = "REJECT";
 
     private final InferenceClient inferenceClient;
+    private final FeatureMapper featureMapper;
 
     @Override
     public AutoReviewResponse score(AutoReviewRequest req) {
-        Map<String, Object> features = toFeatureMap(req);
-        InferenceRequest payload = InferenceRequest.of(List.of(features));
+        InferenceRequest payload = InferenceRequest.of(List.of(featureMapper.toDecisionFeatures(req)));
 
         InferenceResponse decisionRes = inferenceClient.predict(payload);
         if (decisionRes == null || decisionRes.predictions() == null || decisionRes.predictions().isEmpty()) {
@@ -50,7 +49,8 @@ public class InferenceDecisionScorer implements DecisionScorer {
         Double pdScore = null;
         String pdModelVersion = null;
         try {
-            PdInferenceResponse pdRes = inferenceClient.predictPd(payload);
+            InferenceRequest pdPayload = InferenceRequest.of(List.of(featureMapper.toPdFeatures(req)));
+            PdInferenceResponse pdRes = inferenceClient.predictPd(pdPayload);
             if (pdRes != null && pdRes.predictions() != null && !pdRes.predictions().isEmpty()) {
                 pdScore = pdRes.predictions().get(0).pdScore();
                 pdModelVersion = pdRes.modelVersion();
@@ -67,46 +67,5 @@ public class InferenceDecisionScorer implements DecisionScorer {
                 pdScore,
                 pdModelVersion
         );
-    }
-
-    private static Map<String, Object> toFeatureMap(AutoReviewRequest r) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("sex", r.sex());
-        m.put("age", r.age());
-        m.put("marital_status", r.maritalStatus());
-        m.put("military_status", r.militaryStatus());
-        m.put("family_type", r.familyType());
-        m.put("housing_type", r.housingType());
-        m.put("education_level", r.educationLevel());
-        m.put("bachelors_field", r.bachelorsField());
-        m.put("occupation", r.occupation());
-        m.put("district", r.district());
-        m.put("province", r.province());
-        m.put("applicant_segment", r.applicantSegment());
-        m.put("income_quintile", r.incomeQuintile());
-        m.put("annual_income_kw", r.annualIncomeKw());
-        m.put("total_asset_kw", r.totalAssetKw());
-        m.put("total_debt_kw", r.totalDebtKw());
-        m.put("collateral_debt_kw", r.collateralDebtKw());
-        m.put("credit_debt_kw", r.creditDebtKw());
-        m.put("dsr", r.dsr());
-        m.put("ltv", r.ltv());
-        m.put("monthly_cashflow_mean_kw", r.monthlyCashflowMeanKw());
-        m.put("monthly_cashflow_std_kw", r.monthlyCashflowStdKw());
-        m.put("delinquency_history_24m", r.delinquencyHistory24m());
-        m.put("credit_score_proxy", r.creditScoreProxy());
-        m.put("product_code", r.productCode());
-        m.put("requested_amount_kw", r.requestedAmountKw());
-        m.put("requested_period_mo", r.requestedPeriodMo());
-        m.put("purpose_cd", r.purposeCd());
-        m.put("purpose_red_flag", r.purposeRedFlag());
-        m.put("industry_cd", r.industryCd());
-        m.put("region_risk_band", r.regionRiskBand());
-        m.put("n_children", r.nChildren());
-        m.put("employment_years", r.employmentYears());
-        m.put("bureau_has_record", r.bureauHasRecord());
-        m.put("bureau_n_active", r.bureauNActive());
-        m.put("bureau_max_status_24m", r.bureauMaxStatus24m());
-        return m;
     }
 }
