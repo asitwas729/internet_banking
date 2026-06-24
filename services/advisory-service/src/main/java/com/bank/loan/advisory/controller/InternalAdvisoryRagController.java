@@ -7,6 +7,7 @@ import com.bank.loan.advisory.dto.DocumentRegisterResponse;
 import com.bank.loan.advisory.rag.CaseIndexBackfillService;
 import com.bank.loan.advisory.rag.CaseIndexingService;
 import com.bank.loan.advisory.rag.DocumentIngestionService;
+import com.bank.loan.advisory.rag.RagIndexMaintenanceService;
 import com.bank.loan.advisory.repository.AdvisoryDocumentChunkRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -50,6 +51,7 @@ public class InternalAdvisoryRagController {
     private final DocumentIngestionService           ingestionService;
     private final CaseIndexingService                caseIndexingService;
     private final CaseIndexBackfillService           backfillService;
+    private final RagIndexMaintenanceService         indexMaintenanceService;
     private final CurrentActorProvider               currentActor;
     private final AdvisoryDocumentRepository         documentRepository;
     private final AdvisoryDocumentChunkRepository    chunkRepository;
@@ -172,5 +174,13 @@ public class InternalAdvisoryRagController {
         static BackfillResultResponse from(CaseIndexBackfillService.BackfillResult r) {
             return new BackfillResultResponse(r.processed(), r.skipped(), r.failed(), r.dryRun());
         }
+    }
+
+    @Operation(summary = "RAG 벡터 인덱스 재산정",
+            description = "advisory_document_chunk·advisory_case_index 의 IVFFlat lists 를 실측 rows 기준으로 " +
+                          "재계산해 인덱스를 재생성한다. 대량 인입·백필 후 호출. CREATE INDEX 쓰기 락 주의.")
+    @PostMapping("/rag/reindex")
+    public ApiResponse<RagIndexMaintenanceService.ReindexResult> reindex() {
+        return ApiResponse.ok(indexMaintenanceService.reindex());
     }
 }
