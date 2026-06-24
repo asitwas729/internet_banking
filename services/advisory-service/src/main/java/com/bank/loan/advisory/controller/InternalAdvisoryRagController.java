@@ -10,11 +10,13 @@ import com.bank.loan.advisory.rag.DocumentIngestionService;
 import com.bank.loan.advisory.repository.AdvisoryDocumentChunkRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import com.bank.common.web.BusinessException;
+import com.bank.loan.support.LoanErrorCode;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import com.bank.loan.advisory.domain.AdvisoryDocument;
 import com.bank.loan.advisory.repository.AdvisoryDocumentRepository;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,8 +26,11 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -94,6 +99,22 @@ public class InternalAdvisoryRagController {
             @Valid @RequestBody DocumentRegisterRequest req) {
         Long actorId = currentActor.currentActorId();
         DocumentRegisterResponse res = ingestionService.register(req, actorId);
+        return ResponseEntity.status(201).body(ApiResponse.ok(res));
+    }
+
+    @Operation(summary = "정책문서 파일 업로드 및 인입",
+            description = "PDF/Word/HWP 파일을 사이드카(inference-server)로 파싱해 구조-인지 청킹·임베딩·적재 후 " +
+                          "자동 활성화한다. file 파트는 원본 문서, meta 파트(application/json)는 문서 메타.")
+    @PostMapping(value = "/documents/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<DocumentRegisterResponse>> registerDocumentFile(
+            @RequestPart("file") MultipartFile file,
+            @Valid @RequestPart("meta") DocumentRegisterRequest meta) throws IOException {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(LoanErrorCode.LOAN_213, "업로드 파일이 비어있습니다.");
+        }
+        Long actorId = currentActor.currentActorId();
+        DocumentRegisterResponse res = ingestionService.registerFile(
+                meta, file.getBytes(), file.getOriginalFilename(), actorId);
         return ResponseEntity.status(201).body(ApiResponse.ok(res));
     }
 
