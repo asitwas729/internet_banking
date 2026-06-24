@@ -32,7 +32,8 @@ public final class TestRequests {
                 // ---- Layer 3 ----
                 productCode, null, null, null, null,
                 // ---- Layer 4 (PD 전용, 테스트는 미사용) ----
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
     }
 }

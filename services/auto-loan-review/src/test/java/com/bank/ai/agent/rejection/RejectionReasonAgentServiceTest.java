@@ -61,7 +61,8 @@ class RejectionReasonAgentServiceTest {
                 null, null, null, null, null, null,
                 0.50, 0.80, null, null, 0, 750,
                 "MORT_001", 100_000_000L, 360, "아파트 구입", null,
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
     }
 

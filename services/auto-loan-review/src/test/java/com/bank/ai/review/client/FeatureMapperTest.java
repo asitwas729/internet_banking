@@ -20,7 +20,8 @@ class FeatureMapperTest {
                 "남자", 35, "MARRIED", "DONE", "NUCLEAR", "OWN", "BACHELOR", "ENG", "사무직", "강남구", "서울", "regular",
                 5, 9000L, 100000L, 5000L, 3000L, 2000L, 0.28, 0.30, 700L, 50L, 0, 720,
                 "MORT_001", 30000L, 36, "PURCHASE", false,
-                "IND_01", 2, 1, 8, true, 3, 1
+                "IND_01", 2, 1, 8, true, 3, 1,
+                0.55, 0.60, 1, 0.5, 2.0, 10.0, 0.95, 0.1
         );
     }
 
@@ -44,10 +45,13 @@ class FeatureMapperTest {
         Map<String, Object> pd = mapper.toPdFeatures(fullRequest());
 
         assertThat(dec).doesNotContainKey("industry_cd");
-        assertThat(pd).hasSize(36);
+        assertThat(pd).hasSize(44);
         assertThat(pd).containsKeys(
                 "industry_cd", "region_risk_band", "n_children", "employment_years",
                 "bureau_has_record", "bureau_n_active", "bureau_max_status_24m");
+        assertThat(pd).containsKeys(
+                "ext_credit_score_2", "ext_credit_score_3", "bureau_overdue_cnt", "bureau_active_ratio",
+                "past_loan_dpd_mean", "past_loan_dpd_max", "past_loan_pay_ratio", "prev_app_refused_ratio");
     }
 
     @Test
@@ -64,7 +68,8 @@ class FeatureMapperTest {
                 null, 35, null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null,
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
         Map<String, Object> pd = mapper.toPdFeatures(sparse);
 

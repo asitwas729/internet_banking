@@ -270,7 +270,8 @@ class RagPipelineSmokeTest {
                 null, null, null, null, null, null,
                 0.30, 0.50, null, null, 0, 750,
                 "MORT_001", 200_000_000L, 360, "아파트 구입 자금 대출", null,
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
     }
 
@@ -280,7 +281,8 @@ class RagPipelineSmokeTest {
                 null, null, null, null, null, null,
                 0.55, 0.50, null, null, 0, 750,   // dsr=0.55 → DSR_EXCEEDED → TRACK_2
                 "MORT_001", 200_000_000L, 360, "아파트 구입 자금 대출", null,
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
     }
 
@@ -297,7 +299,8 @@ class RagPipelineSmokeTest {
                 null, null, null, null, null, null,
                 0.30, 0.50, null, null, 0, 690,   // dsr=0.30, credit=690 — 하드 제약 통과
                 "MORT_001", 200_000_000L, 360, "아파트 구입 자금 대출", null,
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
     }
 }

@@ -325,7 +325,8 @@ class PreReviewAgentServiceTest {
                 3, 5_000L, 20_000L, 3_000L, 0L, 3_000L,
                 0.35, 0.55, 200L, 50L, 0, 640,
                 "MORT_001", 10_000L, 60, "LIVING", false,
-                "IT", 2, 0, 3, true, 1, 0
+                "IT", 2, 0, 3, true, 1, 0,
+                null, null, null, null, null, null, null, null
         );
     }
 

@@ -101,7 +101,8 @@ class AutoReviewEventListenerTest {
                 null, null, null, null, null, null,
                 0.30, 0.50, null, null, 0, 750,
                 "MORT_001", 200_000_000L, 360, "아파트 구입", null,
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
         var inference = new AutoReviewResponse("hmda_v1", "APPROVE", 0.97,
                 Map.of("APPROVE", 0.97, "REJECT", 0.03), null, null);

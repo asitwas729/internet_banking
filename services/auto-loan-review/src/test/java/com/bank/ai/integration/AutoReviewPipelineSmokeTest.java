@@ -136,7 +136,8 @@ class AutoReviewPipelineSmokeTest {
                 null, null, null, null, null, null,
                 0.55, 0.50, null, null, 0, 750,   // dsr=0.55 초과 → DSR_EXCEEDED
                 "MORT_001", 200_000_000L, 360, "아파트 구입 자금 대출", null,
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
     }
 
@@ -155,7 +156,8 @@ class AutoReviewPipelineSmokeTest {
                 // Layer 3
                 "MORT_001", 200_000_000L, 360, "아파트 구입 자금 대출", null,
                 // Layer 4
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
     }
 
