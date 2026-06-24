@@ -7,6 +7,7 @@ CI 에서 `pytest -m ml_regression` 으로 호출.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -122,3 +123,75 @@ def ks_ci_bootstrap(
     lo = float(np.percentile(kss, 100 * alpha / 2))
     hi = float(np.percentile(kss, 100 * (1 - alpha / 2)))
     return lo, hi
+
+
+def to_age_band(age: int) -> str:
+    """연령 → 밴드 라벨 (4/5ths 교차 그룹용)."""
+    if age < 30:
+        return "20s"
+    if age < 40:
+        return "30s"
+    if age < 50:
+        return "40s"
+    if age < 60:
+        return "50s"
+    return "60+"
+
+
+@dataclass
+class FourFifthsResult:
+    group_col: str
+    rates: dict[str, float]
+    ratio: float
+    passed: bool
+    min_group: str
+    max_group: str
+
+    def to_dict(self) -> dict:
+        return {
+            "group_col": self.group_col,
+            "rates": {k: round(v, 6) for k, v in self.rates.items()},
+            "ratio": round(self.ratio, 6),
+            "passed": self.passed,
+            "min_group": self.min_group,
+            "max_group": self.max_group,
+        }
+
+
+def check_approval_parity(
+    y_pred: np.ndarray,
+    group_df: pd.DataFrame,
+    group_cols: list[str] | None = None,
+    min_ratio: float = 0.80,
+    favorable: int = 1,
+) -> dict[str, FourFifthsResult]:
+    """그룹 컬럼별 favorable(=APPROVE/HIGH) 비율의 min/max 비율 검사.
+
+    ratio = min_rate / max_rate ≥ min_ratio 이면 passed. 컬럼명 → 결과 dict.
+    """
+    y_pred = np.asarray(y_pred)
+    cols = group_cols if group_cols is not None else list(group_df.columns)
+    out: dict[str, FourFifthsResult] = {}
+    for col in cols:
+        groups = group_df[col].astype(str).to_numpy()
+        rates: dict[str, float] = {}
+        for g in np.unique(groups):
+            mask = groups == g
+            if mask.sum() == 0:
+                continue
+            rates[g] = float((y_pred[mask] == favorable).mean())
+        if not rates:
+            continue
+        max_group = max(rates, key=rates.get)
+        min_group = min(rates, key=rates.get)
+        max_rate = rates[max_group]
+        ratio = (rates[min_group] / max_rate) if max_rate > 0 else 0.0
+        out[col] = FourFifthsResult(
+            group_col=col,
+            rates=rates,
+            ratio=ratio,
+            passed=ratio >= min_ratio,
+            min_group=min_group,
+            max_group=max_group,
+        )
+    return out
