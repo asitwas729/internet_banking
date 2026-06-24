@@ -57,7 +57,9 @@ public class RecomputeWithTermsTool {
                 r.delinquencyHistory24m(), r.creditScoreProxy(),
                 r.productCode(), amountKw, periodMo, r.purposeCd(), r.purposeRedFlag(),
                 r.industryCd(), r.regionRiskBand(), r.nChildren(),
-                r.employmentYears(), r.bureauHasRecord(), r.bureauNActive(), r.bureauMaxStatus24m()
+                r.employmentYears(), r.bureauHasRecord(), r.bureauNActive(), r.bureauMaxStatus24m(),
+                r.extCreditScore2(), r.extCreditScore3(), r.bureauOverdueCnt(), r.bureauActiveRatio(),
+                r.pastLoanDpdMean(), r.pastLoanDpdMax(), r.pastLoanPayRatio(), r.prevAppRefusedRatio()
         );
     }
 

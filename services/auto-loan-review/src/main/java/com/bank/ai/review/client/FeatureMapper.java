@@ -69,6 +69,15 @@ public class FeatureMapper {
         m.put("bureau_has_record", toBit(req.bureauHasRecord()));
         m.put("bureau_n_active", req.bureauNActive());
         m.put("bureau_max_status_24m", req.bureauMaxStatus24m());
+        // Layer 4 확장 — homecredit_kr_v1 PD 피처
+        m.put("ext_credit_score_2", req.extCreditScore2());
+        m.put("ext_credit_score_3", req.extCreditScore3());
+        m.put("bureau_overdue_cnt", req.bureauOverdueCnt());
+        m.put("bureau_active_ratio", req.bureauActiveRatio());
+        m.put("past_loan_dpd_mean", req.pastLoanDpdMean());
+        m.put("past_loan_dpd_max", req.pastLoanDpdMax());
+        m.put("past_loan_pay_ratio", req.pastLoanPayRatio());
+        m.put("prev_app_refused_ratio", req.prevAppRefusedRatio());
         return m;
     }
 
