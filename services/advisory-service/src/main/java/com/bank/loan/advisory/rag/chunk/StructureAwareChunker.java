@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * <ol>
  *   <li>TOC/HEADER/FOOTER 블록 제거(사이드카 태그 + 휴리스틱 보강)</li>
  *   <li>HEADING 스택으로 heading_path 추적, 조항(제N조/번호목차) 경계 인식</li>
- *   <li>섹션 본문이 길면 {@link #slidingWindow} 로 800/100 윈도우 분할(섹션 경계 불침범)</li>
+ *   <li>섹션 본문이 길면 {@link #slidingWindow} 로 1000/50 윈도우 분할(섹션 경계 불침범)</li>
  *   <li>표는 작으면 통째, 크면 헤더행 prepend + 행묶음. 중첩표는 table_id/parent_table_id 로 평탄화</li>
  * </ol>
  *
@@ -27,8 +27,10 @@ import java.util.regex.Pattern;
 @Component
 public class StructureAwareChunker {
 
-    static final int CHUNK_SIZE    = 800;
-    static final int CHUNK_OVERLAP = 100;
+    // 청크 크기·overlap: ChunkSizeRetrievalEvalTest 그리드 실측으로 1000/50 채택
+    // (800/100 대비 MRR@5 +35%, nDCG@5 +50%, Recall@10 +18pp — docs/plan/16_chunk_size_eval.md).
+    static final int CHUNK_SIZE    = 1000;
+    static final int CHUNK_OVERLAP = 50;
 
     /** 표 1청크 허용 최대 문자수(초과 시 행묶음 분할). */
     static final int TABLE_INLINE_LIMIT = 700;
