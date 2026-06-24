@@ -98,9 +98,10 @@ public class InternalAdvisoryRagController {
                           "content 필드로 문서 본문을 직접 제공 (source_uri fetch 는 현 단계 미지원).")
     @PostMapping("/documents")
     public ResponseEntity<ApiResponse<DocumentRegisterResponse>> registerDocument(
-            @Valid @RequestBody DocumentRegisterRequest req) {
+            @Valid @RequestBody DocumentRegisterRequest req,
+            @RequestParam(defaultValue = "false") boolean replace) {
         Long actorId = currentActor.currentActorId();
-        DocumentRegisterResponse res = ingestionService.register(req, actorId);
+        DocumentRegisterResponse res = ingestionService.register(req, actorId, replace);
         return ResponseEntity.status(201).body(ApiResponse.ok(res));
     }
 
@@ -110,13 +111,14 @@ public class InternalAdvisoryRagController {
     @PostMapping(value = "/documents/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<DocumentRegisterResponse>> registerDocumentFile(
             @RequestPart("file") MultipartFile file,
-            @Valid @RequestPart("meta") DocumentRegisterRequest meta) throws IOException {
+            @Valid @RequestPart("meta") DocumentRegisterRequest meta,
+            @RequestParam(defaultValue = "false") boolean replace) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new BusinessException(LoanErrorCode.LOAN_213, "업로드 파일이 비어있습니다.");
         }
         Long actorId = currentActor.currentActorId();
         DocumentRegisterResponse res = ingestionService.registerFile(
-                meta, file.getBytes(), file.getOriginalFilename(), actorId);
+                meta, file.getBytes(), file.getOriginalFilename(), actorId, replace);
         return ResponseEntity.status(201).body(ApiResponse.ok(res));
     }
 

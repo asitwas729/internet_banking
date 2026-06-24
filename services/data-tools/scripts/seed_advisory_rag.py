@@ -124,12 +124,16 @@ def build_payload(filepath: str) -> dict:
 # HTTP 클라이언트
 # ---------------------------------------------------------------------------
 
-def register_document(host: str, payload: dict, dry_run: bool) -> str:
+def register_document(host: str, payload: dict, dry_run: bool, force: bool = False) -> str:
     """
     문서를 적재하고 결과 문자열 반환.
     반환값: "OK", "SKIP", "FAIL"
+
+    force=True 면 replace=true 로 기존 동일 doc_cd/version 을 교체 재인입(청크 재청킹).
     """
     url = f"{host}/api/internal/advisory/documents"
+    if force:
+        url += "?replace=true"
 
     if dry_run:
         print(f"  [DRY-RUN] POST {url}")
@@ -181,6 +185,8 @@ def main():
         help="시드 데이터 루트 디렉토리 (기본값: advisory-service/seed-data/)",
     )
     parser.add_argument("--dry-run", action="store_true", help="실제 요청 없이 대상만 출력")
+    parser.add_argument("--force", action="store_true",
+                        help="기존 동일 doc_cd/version 을 교체 재인입(청크 재청킹). 청크 설정 변경 후 재인입용")
     args = parser.parse_args()
 
     seed_dir = os.path.abspath(args.seed_dir)
@@ -193,7 +199,7 @@ def main():
         print(f"경고: {seed_dir} 에서 .md 파일을 찾지 못했습니다.")
         sys.exit(0)
 
-    print(f"=== Advisory RAG 시딩  host={args.host}  dry_run={args.dry_run}  파일 수={len(files)} ===\n")
+    print(f"=== Advisory RAG 시딩  host={args.host}  dry_run={args.dry_run}  force={args.force}  파일 수={len(files)} ===\n")
 
     ok = skip = fail = 0
     for filepath in files:
@@ -206,7 +212,7 @@ def main():
             fail += 1
             continue
 
-        result = register_document(args.host, payload, args.dry_run)
+        result = register_document(args.host, payload, args.dry_run, args.force)
         if result == "OK":
             ok += 1
         elif result == "SKIP":

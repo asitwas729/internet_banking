@@ -58,6 +58,11 @@ public class DocumentIngestionService {
 
     /** content 직접 제공 경로 — 평문을 단일 블록으로 래핑해 동일 청킹 경로로 통일. */
     public DocumentRegisterResponse register(DocumentRegisterRequest req, Long actorId) {
+        return register(req, actorId, false);
+    }
+
+    /** content 직접 제공 + 교체 옵션(replace=true 면 동일 doc_cd/version 재인입). */
+    public DocumentRegisterResponse register(DocumentRegisterRequest req, Long actorId, boolean replace) {
         if (req.content() == null || req.content().isBlank()) {
             throw new BusinessException(LoanErrorCode.LOAN_003,
                     "content 가 비어있습니다. content 직접 제공 또는 파일 업로드가 필요합니다.");
@@ -65,12 +70,18 @@ public class DocumentIngestionService {
         List<DocumentBlock> blocks = List.of(
                 new DocumentBlock(BlockType.PARAGRAPH, req.content(), null, null, 0, null));
         List<Chunk> chunks = chunker.chunk(blocks, new DocMeta(req.docCategoryCd()));
-        return ingest(req, chunks, actorId);
+        return ingest(req, chunks, actorId, replace);
     }
 
     /** 파일 업로드 경로 — 사이드카 파싱 → 구조-인지 청킹. */
     public DocumentRegisterResponse registerFile(DocumentRegisterRequest req, byte[] fileBytes,
                                                   String filename, Long actorId) {
+        return registerFile(req, fileBytes, filename, actorId, false);
+    }
+
+    /** 파일 업로드 + 교체 옵션. */
+    public DocumentRegisterResponse registerFile(DocumentRegisterRequest req, byte[] fileBytes,
+                                                  String filename, Long actorId, boolean replace) {
         ParseResult parsed = parseClient.parse(fileBytes, filename, DocFormat.fromFilename(filename));
         List<Chunk> chunks = chunker.chunk(parsed.blocks(), new DocMeta(req.docCategoryCd()));
         if (chunks.isEmpty()) {
@@ -82,14 +93,15 @@ public class DocumentIngestionService {
             log.warn("문서 파싱 degraded — 저품질 가능: file={} engine={} blocks={} chunks={}",
                      filename, parsed.engine(), parsed.blocks().size(), chunks.size());
         }
-        return ingest(req, chunks, actorId);
+        return ingest(req, chunks, actorId, replace);
     }
 
     // ──────────────────────────────────────────────────
     // 공통 적재 (embed 선계산 → 트랜잭션 INSERT)
     // ──────────────────────────────────────────────────
 
-    private DocumentRegisterResponse ingest(DocumentRegisterRequest req, List<Chunk> chunks, Long actorId) {
+    private DocumentRegisterResponse ingest(DocumentRegisterRequest req, List<Chunk> chunks,
+                                            Long actorId, boolean replace) {
         if (chunks.isEmpty()) {
             throw new BusinessException(LoanErrorCode.LOAN_003, "청크가 비어있어 적재할 수 없습니다.");
         }
@@ -107,7 +119,16 @@ public class DocumentIngestionService {
         DocumentRegisterResponse resp = Objects.requireNonNull(
             transactionTemplate.execute(status -> {
                 docRepo.findByDocCdAndDocVersionAndDeletedAtIsNull(req.docCd(), req.docVersion())
-                       .ifPresent(d -> { throw new BusinessException(LoanErrorCode.LOAN_001); });
+                       .ifPresent(existing -> {
+                           if (!replace) throw new BusinessException(LoanErrorCode.LOAN_001);
+                           // 교체: 기존 청크 하드삭제(append-only·재생성 가능) + 문서 소프트삭제.
+                           // 부분 유니크 인덱스(WHERE deleted_at IS NULL)가 풀리도록 flush 후 신규 INSERT.
+                           jdbcTemplate.update(
+                                   "DELETE FROM advisory_document_chunk WHERE doc_id = ?", existing.getDocId());
+                           existing.softDelete(actorId);
+                           docRepo.saveAndFlush(existing);
+                           log.info("정책문서 교체 — 기존 docId={} 소프트삭제·청크 삭제 후 재인입", existing.getDocId());
+                       });
 
                 AdvisoryDocument doc = docRepo.save(AdvisoryDocument.builder()
                         .docCd(req.docCd())
