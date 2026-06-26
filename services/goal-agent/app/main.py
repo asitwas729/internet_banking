@@ -1,3 +1,6 @@
+import base64
+import json as _json
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -46,10 +49,20 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def _require_api_key() -> None:
+    """GOAL_AGENT_API_KEY 미설정 시 서비스 기동을 거부한다."""
+    if not settings.api_key:
+        raise RuntimeError(
+            "GOAL_AGENT_API_KEY environment variable must be set. "
+            "Refusing to start without authentication."
+        )
+
+
 @app.middleware("http")
 async def verify_internal_token(request: Request, call_next):
-    """내부 서비스 인증. api_key 가 설정된 경우에만 X-Internal-Token 헤더를 검증한다."""
-    if settings.api_key and request.url.path != "/health":
+    """내부 서비스 인증. /health 를 제외한 모든 요청에 X-Internal-Token 헤더를 검증한다."""
+    if request.url.path != "/health":
         token = request.headers.get("X-Internal-Token", "")
         if token != settings.api_key:
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
