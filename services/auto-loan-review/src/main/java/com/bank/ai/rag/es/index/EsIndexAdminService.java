@@ -1,6 +1,9 @@
 package com.bank.ai.rag.es.index;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.ScrollResponse;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.indices.UpdateAliasesRequest;
 import co.elastic.clients.elasticsearch.indices.update_aliases.Action;
 import co.elastic.clients.elasticsearch.indices.update_aliases.AddAction;
@@ -14,6 +17,10 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * ES 인덱스 생명주기 관리 서비스 — Phase E (E1-6).
@@ -120,6 +127,81 @@ public class EsIndexAdminService {
                 Action.of(a -> a.add(AddAction.of(add -> add.index(newIndex).alias(alias))))
         )));
         log.info("EsIndexAdminService: alias swap 완료 — alias={} {} → {}", alias, oldIndex, newIndex);
+    }
+
+    // ── 재색인(re-embedding) 지원 — Step 2 ───────────────────────────────────
+
+    private static final String SCROLL_TTL = "2m";
+    private static final int SCROLL_PAGE = 500;
+
+    /** 인덱스가 없을 때만 매핑으로 생성(멱등). */
+    public void createIfAbsent(String indexName, String mappingResource) throws IOException {
+        if (!indexExists(indexName)) {
+            createIndex(indexName, mappingResource);
+        }
+    }
+
+    /**
+     * alias 가 현재 가리키는 단일 인덱스명 반환.
+     *
+     * @throws IllegalStateException alias 가 가리키는 인덱스가 없을 때
+     */
+    public String currentIndexForAlias(String alias) throws IOException {
+        Set<String> indices = esClient.indices().getAlias(a -> a.name(alias)).result().keySet();
+        if (indices.isEmpty()) {
+            throw new IllegalStateException("alias 가 가리키는 인덱스 없음: " + alias);
+        }
+        return indices.iterator().next();
+    }
+
+    /** 인덱스 문서 수. */
+    public long docCount(String indexName) throws IOException {
+        return esClient.count(c -> c.index(indexName)).count();
+    }
+
+    /** 단건 색인 — 동일 id 면 덮어쓰기(멱등). */
+    public void indexDoc(String indexName, String id, Map<String, Object> source) throws IOException {
+        esClient.index(i -> i.index(indexName).id(id).document(source));
+    }
+
+    /** 인덱스 refresh — 색인 직후 검색 가시성 확보. */
+    public void refresh(String indexName) throws IOException {
+        esClient.indices().refresh(r -> r.index(indexName));
+    }
+
+    /** 인덱스 전체 문서를 scroll 로 읽어 반환. 재색인 소스 확보용. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public List<ReindexDoc> readAllDocs(String indexName) throws IOException {
+        List<ReindexDoc> docs = new ArrayList<>();
+        SearchResponse<Map> resp = esClient.search(s -> s
+                .index(indexName)
+                .size(SCROLL_PAGE)
+                .scroll(t -> t.time(SCROLL_TTL))
+                .query(q -> q.matchAll(m -> m)), Map.class);
+        String scrollId = resp.scrollId();
+        List<Hit<Map>> hits = resp.hits().hits();
+        try {
+            while (hits != null && !hits.isEmpty()) {
+                for (Hit<Map> h : hits) {
+                    docs.add(new ReindexDoc(h.id(), (Map<String, Object>) h.source()));
+                }
+                final String sid = scrollId;
+                ScrollResponse<Map> sr = esClient.scroll(
+                        sc -> sc.scrollId(sid).scroll(t -> t.time(SCROLL_TTL)), Map.class);
+                scrollId = sr.scrollId();
+                hits = sr.hits().hits();
+            }
+        } finally {
+            final String sid = scrollId;
+            if (sid != null) {
+                try {
+                    esClient.clearScroll(cs -> cs.scrollId(sid));
+                } catch (Exception ignore) {
+                    // best-effort — scroll 컨텍스트는 TTL 로도 정리됨
+                }
+            }
+        }
+        return docs;
     }
 
     // ────────────────────────────────────────────────────────────────────────
