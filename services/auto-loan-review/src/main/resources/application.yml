@@ -64,6 +64,9 @@ ai:
     embedding:
       provider: ${AI_RAG_EMB_PROVIDER:stub}       # stub / vertex
       dimensions: 768                             # text-embedding-005 기본 출력 (Phase E: 1024→768)
+      max-attempts: ${AI_RAG_EMB_MAX_ATTEMPTS:3}  # vertex 호출 최대 시도(재시도 포함)
+      backoff-ms: ${AI_RAG_EMB_BACKOFF_MS:500}    # 지수 백오프 기준 (attempt n 대기 = backoff*2^(n-1))
+      batch-size: ${AI_RAG_EMB_BATCH_SIZE:250}    # 1 요청당 텍스트 수 (vertex 250 상한)
     es:
       uris: ${ES_URIS:http://localhost:9200}
       api-key: ${ES_API_KEY:}
