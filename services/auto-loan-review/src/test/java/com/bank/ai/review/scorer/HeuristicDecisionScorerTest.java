@@ -172,7 +172,8 @@ class HeuristicDecisionScorerTest {
                 0.20, 0.40, 4_000L, 500L,
                 0, 780,
                 "HMDA_01", 30_000L, 120, "LIVING", false,
-                "IT", 1, 1, 5, true, 0, 0
+                "IT", 1, 1, 5, true, 0, 0,
+                null, null, null, null, null, null, null, null
         );
     }
 
@@ -185,7 +186,8 @@ class HeuristicDecisionScorerTest {
                 0.75, 0.90, 1_200L, 800L,
                 4, 150,
                 "HMDA_03", 50_000L, 60, "INVEST", true,
-                null, 3, 2, 0, true, 5, 4
+                null, 3, 2, 0, true, 5, 4,
+                null, null, null, null, null, null, null, null
         );
     }
 
@@ -213,7 +215,8 @@ class HeuristicDecisionScorerTest {
                 delinquency, creditScore,
                 null, null, null, null, redFlag,
                 null, null, null, null, null, null,
-                bureauMax != null ? bureauMax : 0  // null → 안전값 0
+                bureauMax != null ? bureauMax : 0,  // null → 안전값 0
+                null, null, null, null, null, null, null, null
         );
     }
 }

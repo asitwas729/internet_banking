@@ -35,6 +35,14 @@ public class InferenceClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(req)
                     .retrieve()
+                    .onStatus(status -> status.value() == 503, (request, response) -> {
+                        log.error("inference /predict unavailable: status=503");
+                        throw new BusinessException(AiErrorCode.INFERENCE_UNAVAILABLE);
+                    })
+                    .onStatus(status -> status.value() == 422, (request, response) -> {
+                        log.error("inference /predict invalid feature: status=422");
+                        throw new BusinessException(AiErrorCode.INFERENCE_INVALID_FEATURE);
+                    })
                     .onStatus(HttpStatusCode::isError, (request, response) -> {
                         log.error("inference /predict error: status={}", response.getStatusCode());
                         throw new BusinessException(AiErrorCode.INFERENCE_FAILED);
@@ -49,8 +57,9 @@ public class InferenceClient {
     /**
      * PD 모델 — homecredit binary:logistic + isotonic 캘리브레이션.
      *
-     * <p>404/503 (PD 모델 미배포) 발생 시 {@link BusinessException AiErrorCode.INFERENCE_FAILED} 로
-     * 변환 — 호출 측이 catch 해 decision-only fallback 으로 진행해야 한다.
+     * <p>503(PD 모델 미배포)→INFERENCE_UNAVAILABLE, 422(피처 오류)→INFERENCE_INVALID_FEATURE,
+     * 그 외 4xx/5xx→INFERENCE_FAILED. 모두 {@link BusinessException} 이므로 호출 측이 catch 해
+     * decision-only fallback 으로 진행한다.
      */
     public PdInferenceResponse predictPd(InferenceRequest req) {
         try {
@@ -59,6 +68,14 @@ public class InferenceClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(req)
                     .retrieve()
+                    .onStatus(status -> status.value() == 503, (request, response) -> {
+                        log.warn("inference /predict/pd unavailable: status=503");
+                        throw new BusinessException(AiErrorCode.INFERENCE_UNAVAILABLE);
+                    })
+                    .onStatus(status -> status.value() == 422, (request, response) -> {
+                        log.warn("inference /predict/pd invalid feature: status=422");
+                        throw new BusinessException(AiErrorCode.INFERENCE_INVALID_FEATURE);
+                    })
                     .onStatus(HttpStatusCode::isError, (request, response) -> {
                         log.warn("inference /predict/pd error: status={}", response.getStatusCode());
                         throw new BusinessException(AiErrorCode.INFERENCE_FAILED);

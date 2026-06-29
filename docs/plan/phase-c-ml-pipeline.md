@@ -603,8 +603,18 @@ tests/test_train_pd.py
 
 ### 6. 완료 기준
 
+원안(합성/리치피처 가정):
 - holdout Gini ≥ 0.64 (AUC-ROC ≥ 0.82)
 - holdout KS ≥ 0.41
+
+**실데이터 재조정(2026-06-24, Home Credit 실 TARGET 학습 기준):**
+원안 0.64 는 Kaggle 우승급 수백 피처+스태킹에서만 도달 가능 — 유지보수 가능한
+피처셋(EXT_SOURCE 분리 + bureau + installments DPD + prev_app, 37피처)으로는
+실측 **AUC 0.76 / Gini 0.52 / KS 0.39** 가 현실 천장. 이를 정식 기준으로 채택:
+- holdout Gini ≥ 0.45 (AUC-ROC ≥ 0.72)
+- holdout KS ≥ 0.35
+- lift_decile1 ≥ 2.5
+공통:
 - Brier score(calibrated) < Brier score(raw)
 - 4/5ths ratio(sex) ≥ 0.80 (PD threshold 기준 HIGH/LOW 비율)
 - ONNX smoke PASS

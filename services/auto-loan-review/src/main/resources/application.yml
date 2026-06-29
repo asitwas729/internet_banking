@@ -10,6 +10,13 @@ spring:
     exclude:
       - org.springframework.ai.model.vertexai.autoconfigure.embedding.VertexAiTextEmbeddingAutoConfiguration
 
+  # ---- B5-2: Admin HTTP Basic 인증 ----
+  security:
+    user:
+      name: ${AI_ADMIN_USER:ai-admin}
+      password: ${AI_ADMIN_PASSWORD:dev-only-change-in-prod}
+      roles: AI_ADMIN
+
   # ---- PostgreSQL (B1 Audit Log) ----
   datasource:
     url: ${AI_DB_URL:jdbc:postgresql://localhost:5437/ai_db}
@@ -96,6 +103,7 @@ ai:
   audit:
     enabled: ${AI_AUDIT_ENABLED:true}
     include-raw-llm-response: ${AI_AUDIT_RAW_LLM:false}   # LLM 원문 저장 여부 (PII 위험 ↑)
+    prompt-version: ${AI_AUDIT_PROMPT_VERSION:v1}          # 현재 배포 프롬프트 버전 (재현 추적)
 
   # ---- loan-service 콜백 클라이언트 ----
   loan-service:

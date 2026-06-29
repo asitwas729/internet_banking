@@ -117,6 +117,14 @@ public class LlmRequestRateMeter {
     /** 테스트용 — 현재 RPM 누적 수. */
     int getRpmCount() { return rpmCount.get(); }
 
+    /** 관리자 flush — RPM/RPD 카운터를 즉시 0으로 리셋한다 (장애 복구용). */
+    public synchronized void flush() {
+        rpmCount.set(0);
+        rpdCount.set(0);
+        rpmWindowStartMs = clock.millis();
+        log.info("LlmRequestRateMeter: 관리자 flush — rpm/rpd 카운터 초기화");
+    }
+
     // ─────────────────────────────────────────────────────────────
 
     private void resetIfNeeded() {

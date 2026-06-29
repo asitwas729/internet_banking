@@ -178,3 +178,88 @@ def prepare_labels(df: pd.DataFrame, schema: FeatureSchema | None = None) -> pd.
         unknown = sorted(df.loc[y.isna(), TARGET_COLUMN].unique().tolist())
         raise ValueError(f"unknown label values: {unknown} (expected {schema.label_classes})")
     return y.astype("int32")
+
+
+# ── HMDA Decision Score (이진 분류) ────────────────────────────────────────────
+# Layer 1~3 피처만 사용. Layer 4 PD 전용 컬럼(employment_years 등)은 PD 모델에서 별도 처리.
+HMDA_CATEGORICAL: list[str] = [
+    "sex",
+    "marital_status",
+    "family_type",
+    "housing_type",
+    "education_level",
+    "occupation",
+    "province",
+    "applicant_segment",
+    "product_code",
+    "purpose_cd",
+]
+
+HMDA_NUMERIC: list[str] = [
+    "age",
+    "income_quintile",
+    "annual_income_kw",
+    "total_asset_kw",
+    "total_debt_kw",
+    "collateral_debt_kw",
+    "credit_debt_kw",
+    "dsr",
+    "ltv",
+    "monthly_cashflow_mean_kw",
+    "monthly_cashflow_std_kw",
+    "delinquency_history_24m",
+    "credit_score_proxy",
+    "requested_amount_kw",
+    "requested_period_mo",
+]
+
+HMDA_BOOLEAN: list[str] = ["purpose_red_flag"]
+
+# 이진 라벨: index 0=REJECT, 1=APPROVE → POSITIVE_CLASS 는 1.
+HMDA_LABEL_CLASSES: list[str] = ["REJECT", "APPROVE"]
+HMDA_POSITIVE_CLASS: str = "APPROVE"
+
+# oracle 3-class → HMDA 이진 매핑.
+# CONDITIONAL(조건부 승인) 은 HMDA action_taken 기준 '승인'으로 분류한다.
+HMDA_LABEL_MAP: dict[str, str] = {
+    "APPROVE": "APPROVE",
+    "CONDITIONAL": "APPROVE",
+    "REJECT": "REJECT",
+}
+
+
+def hmda_feature_schema() -> FeatureSchema:
+    """HMDA Decision Score(이진) 전용 FeatureSchema 생성.
+
+    category_codes 는 비어 있으므로 학습 직전 fit_categories() 로 채워야 한다.
+    """
+    return FeatureSchema(
+        categorical=list(HMDA_CATEGORICAL),
+        numeric=list(HMDA_NUMERIC),
+        boolean=list(HMDA_BOOLEAN),
+        label_classes=list(HMDA_LABEL_CLASSES),
+    )
+
+
+def prepare_hmda_labels(
+    df: pd.DataFrame,
+    source_col: str = TARGET_COLUMN,
+    label_map: dict[str, str] | None = None,
+) -> pd.Series:
+    """oracle_decision(3-class) → HMDA 이진 라벨(0=REJECT, 1=APPROVE).
+
+    CONDITIONAL 은 기본 매핑상 APPROVE(1) 로 분류한다(조건부 승인=승인).
+    이미 'decision_label' 같은 이진 컬럼이 있으면 source_col 로 지정해 그대로 인코딩 가능.
+    """
+    label_map = label_map or HMDA_LABEL_MAP
+    if source_col not in df.columns:
+        raise KeyError(f"missing source column: {source_col}")
+    mapped = df[source_col].map(lambda v: label_map.get(v, v))
+    class_idx = {c: i for i, c in enumerate(HMDA_LABEL_CLASSES)}
+    y = mapped.map(class_idx)
+    if y.isna().any():
+        unknown = sorted(df.loc[y.isna(), source_col].astype(str).unique().tolist())
+        raise ValueError(
+            f"unknown label values: {unknown} (expected keys {list(label_map)})"
+        )
+    return y.astype("int32")

@@ -55,6 +55,16 @@ public record AutoReviewRequest(
         Integer employmentYears,
         Boolean bureauHasRecord,
         Integer bureauNActive,
-        Integer bureauMaxStatus24m
+        Integer bureauMaxStatus24m,
+
+        // ---- Layer 4 확장: homecredit_kr_v1 PD 피처 (한국신용정보원 소싱 대상) ----
+        Double extCreditScore2,
+        Double extCreditScore3,
+        Integer bureauOverdueCnt,
+        Double bureauActiveRatio,
+        Double pastLoanDpdMean,
+        Double pastLoanDpdMax,
+        Double pastLoanPayRatio,
+        Double prevAppRefusedRatio
 ) {
 }

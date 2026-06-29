@@ -6,6 +6,7 @@ import com.bank.ai.agent.PreReviewAgentService;
 import com.bank.ai.agent.RiskLevel;
 import com.bank.ai.audit.AuditLogProperties;
 import com.bank.ai.audit.AuditLogService;
+import com.bank.ai.llm.config.LlmProperties;
 import com.bank.ai.llm.purpose.PurposeAnalysis;
 import com.bank.ai.llm.purpose.PurposeAnalysisService;
 import com.bank.ai.llm.report.ReviewReport;
@@ -84,7 +85,9 @@ class AutoReviewEventListenerTest {
         listener = new AutoReviewEventListener(
                 purposeAnalysisService, reviewReportService, preReviewAgentService,
                 ragRetrievalService, loanServiceClient, auditLogService,
-                new AuditLogProperties(true, false),
+                new AuditLogProperties(true, false, "v1"),
+                new LlmProperties(true, LlmProperties.Provider.STUB, "stub-v1",
+                        512, 0.0, 1_000_000L, "", "", 1500, 15),
                 metricsRecorder,
                 objectMapper);
         lenient().when(ragRetrievalService.retrieve(any(), any(), any(), any(), any()))
@@ -98,7 +101,8 @@ class AutoReviewEventListenerTest {
                 null, null, null, null, null, null,
                 0.30, 0.50, null, null, 0, 750,
                 "MORT_001", 200_000_000L, 360, "아파트 구입", null,
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null
         );
         var inference = new AutoReviewResponse("hmda_v1", "APPROVE", 0.97,
                 Map.of("APPROVE", 0.97, "REJECT", 0.03), null, null);
