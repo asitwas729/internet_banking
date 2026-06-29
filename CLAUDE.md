@@ -1,52 +1,73 @@
-# Claude Code Instructions
+# Claude Code Guidelines
 
-이 레포의 공통 AI 가이드는 **[`docs/AI_GUIDELINES.md`](docs/AI_GUIDELINES.md)** 를 따른다.
-본 파일은 Claude Code 환경에서만 적용되는 추가 사항이다.
+## Convention
+- Commit: `<type>(<scope>): <subject>` (single-line, Korean subject)
+- Use only user-provided branches
+- Java 17 / 4 spaces
+- Lombok: `@Getter @Builder @RequiredArgsConstructor @Slf4j`
+- Forbidden: `@Data @AllArgsConstructor @Setter(entity)`
 
----
+## Architecture
+- `controller -> service -> repository -> domain -> common`
+- No cross-service imports
+- Domain = pure POJO
 
-## 컨텍스트 우선순위
+## Engineering
+- No `SELECT *`
+- Use `#{}` only
+- Prevent N+1
+- No broad/swallowed exceptions
+- Use `BusinessException + ErrorCode`
+- Mask sensitive logs + `traceId`
+- No external API in transactions
+- No cache without TTL
+- No unpaged `findAll`
 
-1. 사용자의 현재 메시지
-2. `docs/AI_GUIDELINES.md` (공통 가이드)
-3. 본 파일 (Claude Code 특이사항)
-4. 그 외 레포 파일
+## Finance
+- Money = `BIGINT`
+- Rate = `INT` (bps)
+- No hard delete
+- Keep status history
+- Encrypt/mask sensitive data
+- Date = `CHAR(8)` (`YYYYMMDD`)
+- Datetime = `TIMESTAMPTZ(3)`
 
-상충 시 위쪽이 우선.
+## Workflow
+- Read before write
+- Show affected files before large changes
+- Keep changes scoped to one domain/purpose
+- Prefer root-cause fixes over workaround patches
+- Confirm destructive changes
+- Approve if changing >5 files
+- Verify all services if `common` changes
+- Report if unverified
 
----
+## Forbidden
+- No prod DB access
+- No direct push to `main`
+- No `.env` commits
+- No AI traces
 
-## 프로젝트 개요
+## Hard Stop
+- Security risk
+- Insufficient context
+- Blindly generating >200 LOC
 
-- **이름**: Internet Banking MVP
-- **스택**: Java 17 / Spring Boot 3.x / Gradle Multi-module / PostgreSQL 16 / Redis 7 / Docker
-- **서비스**: customer-service, deposit-service, loan-service, payment-service
-- **모니터링**: Prometheus + Grafana
-- **패키지 root**: `com.bank`
+## Context Efficiency
+- Read only relevant symbols/ranges
+- Prefer minimal diff-based edits
+- Avoid re-reading unchanged files
+- Run targeted tests only
+- Avoid full test/build logs
+- Prefer minimal output (`--quiet`)
+- Avoid `--debug` and full stack traces unless required
+- Remove WHAT comments
+- Keep WHY comments only
+- Move long explanations to docs
+- Keep API descriptions minimal
+- Remove generated comments
 
-상세 구조는 `README.md` 참조 (작성 예정).
-
----
-
-## Claude Code 특이사항
-
-### 자동 허용 권장 명령
-다음은 부작용이 작거나 검증용이라 매번 묻지 않아도 무방:
-- `./gradlew build`, `./gradlew test`, `./gradlew :services:*:bootRun`
-- `docker compose ps`, `docker compose logs`
-- `git status`, `git diff`, `git log`
-- `curl http://localhost:*`
-
-(실제 허용 설정은 `.claude/settings.json` 또는 사용자 권한 모드로 관리)
-
-### 금지
-- 운영/스테이징 DB 접속 명령
-- `main` 브랜치 직접 커밋·푸시
-- `.env` 파일 커밋
-- 커밋 메시지·PR 본문에 AI 모델명·세션 링크·자기 홍보 문구 삽입 (공통 가이드 §5)
-
-### 작업 흐름
-- 큰 변경(파일 5개 이상 또는 설계 변경) 전엔 계획을 보여주고 승인 받기
-- 파괴적 작업(`rm`, `reset --hard`, `force push`) 전 명시적 승인 받기
-- 브랜치 네이밍: `claude/<short-desc>`
-- 커밋 컨벤션: 공통 가이드 §1 (Conventional Commits, 한국어 권장)
+## Interaction Efficiency
+- Batch related work in one turn
+- Prefer direct implementation/results
+- Minimize unnecessary back-and-forth

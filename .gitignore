@@ -69,3 +69,10 @@ CLAUDE.local.md
 
 # 개인 이력서 (공유 대상 아님)
 이력서_쉬운버전.md
+
+# DB 덤프·테스트 산출물·인증 상태 (공유 대상 아님)
+db-dump/
+docs/erd/
+web/e2e/.auth/
+web/playwright-report/
+web/test-results/
