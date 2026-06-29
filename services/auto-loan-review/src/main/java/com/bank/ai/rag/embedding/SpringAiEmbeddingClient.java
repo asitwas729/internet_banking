@@ -1,5 +1,6 @@
 package com.bank.ai.rag.embedding;
 
+import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.support.AiErrorCode;
 import com.bank.common.web.BusinessException;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,14 +28,20 @@ import java.util.List;
 @ConditionalOnProperty(prefix = "ai.rag.embedding", name = "provider", havingValue = "vertex")
 public class SpringAiEmbeddingClient implements EmbeddingClient {
 
+    /** 메트릭 model 태그 — Vertex 배포 임베딩 모델. */
+    static final String MODEL = "text-embedding-005";
+
     private final EmbeddingModel embeddingModel;
+    private final AgentMetricsRecorder metrics;
     private final int dimensions;
     private final int maxAttempts;
     private final long backoffMs;
     private final int batchSize;
 
-    public SpringAiEmbeddingClient(EmbeddingModel embeddingModel, EmbeddingProperties props) {
+    public SpringAiEmbeddingClient(EmbeddingModel embeddingModel, EmbeddingProperties props,
+                                   AgentMetricsRecorder metrics) {
         this.embeddingModel = embeddingModel;
+        this.metrics = metrics;
         this.dimensions = props.dimensions();
         this.maxAttempts = props.maxAttempts();
         this.backoffMs = props.backoffMs();
@@ -60,33 +68,51 @@ public class SpringAiEmbeddingClient implements EmbeddingClient {
         return out;
     }
 
-    /** 단일 배치를 재시도·검증과 함께 임베딩. */
+    /** 단일 배치를 재시도·검증과 함께 임베딩. 지연·건수·비용 proxy 를 메트릭으로 기록. */
     private List<float[]> embedBatchWithRetry(List<String> batch) {
-        RuntimeException last = null;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                List<float[]> vectors = embeddingModel.embed(batch);
-                validate(vectors, batch.size());
-                return vectors;
-            } catch (BusinessException e) {
-                // 차원/개수 불일치 등 — 재시도해도 동일, 즉시 전파
-                throw e;
-            } catch (RuntimeException e) {
-                if (!isRetryable(e)) {
-                    log.error("vertex 임베딩 영구 실패(재시도 안 함): {}", e.toString());
-                    throw new BusinessException(AiErrorCode.EMBEDDING_FAILED,
-                            "vertex 임베딩 영구 실패: " + e.getMessage());
-                }
-                last = e;
-                log.warn("vertex 임베딩 attempt {}/{} 실패: {}", attempt, maxAttempts, e.toString());
-                if (attempt < maxAttempts) {
-                    sleepBackoff(attempt);
+        long startNanos = System.nanoTime();
+        boolean ok = false;
+        try {
+            RuntimeException last = null;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    List<float[]> vectors = embeddingModel.embed(batch);
+                    validate(vectors, batch.size());
+                    ok = true;
+                    return vectors;
+                } catch (BusinessException e) {
+                    // 차원/개수 불일치 등 — 재시도해도 동일, 즉시 전파
+                    throw e;
+                } catch (RuntimeException e) {
+                    if (!isRetryable(e)) {
+                        log.error("vertex 임베딩 영구 실패(재시도 안 함): {}", e.toString());
+                        throw new BusinessException(AiErrorCode.EMBEDDING_FAILED,
+                                "vertex 임베딩 영구 실패: " + e.getMessage());
+                    }
+                    last = e;
+                    log.warn("vertex 임베딩 attempt {}/{} 실패: {}", attempt, maxAttempts, e.toString());
+                    if (attempt < maxAttempts) {
+                        sleepBackoff(attempt);
+                    }
                 }
             }
+            throw new BusinessException(AiErrorCode.EMBEDDING_FAILED,
+                    "vertex 임베딩 " + maxAttempts + "회 재시도 실패: "
+                            + (last != null ? last.getMessage() : "unknown"));
+        } finally {
+            metrics.recordEmbedding(MODEL, ok,
+                    Duration.ofNanos(System.nanoTime() - startNanos), batch.size(), charCount(batch));
         }
-        throw new BusinessException(AiErrorCode.EMBEDDING_FAILED,
-                "vertex 임베딩 " + maxAttempts + "회 재시도 실패: "
-                        + (last != null ? last.getMessage() : "unknown"));
+    }
+
+    private static long charCount(List<String> batch) {
+        long chars = 0L;
+        for (String t : batch) {
+            if (t != null) {
+                chars += t.length();
+            }
+        }
+        return chars;
     }
 
     private void validate(List<float[]> vectors, int expectedCount) {

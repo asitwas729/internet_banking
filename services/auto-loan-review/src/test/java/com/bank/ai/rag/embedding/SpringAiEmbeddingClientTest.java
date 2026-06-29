@@ -1,7 +1,9 @@
 package com.bank.ai.rag.embedding;
 
+import com.bank.ai.metrics.AgentMetricsRecorder;
 import com.bank.ai.support.AiErrorCode;
 import com.bank.common.web.BusinessException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -31,10 +33,12 @@ class SpringAiEmbeddingClientTest {
 
     private static final int DIM = 4;
 
+    private final AgentMetricsRecorder metrics = new AgentMetricsRecorder(new SimpleMeterRegistry());
+
     /** 백오프 0 으로 테스트 지연 제거, 작은 차원/배치로 검증. */
     private SpringAiEmbeddingClient client(int maxAttempts, int batchSize) {
         EmbeddingProperties props = new EmbeddingProperties("vertex", DIM, maxAttempts, 0L, batchSize);
-        return new SpringAiEmbeddingClient(embeddingModel, props);
+        return new SpringAiEmbeddingClient(embeddingModel, props, metrics);
     }
 
     private static float[] vec() {

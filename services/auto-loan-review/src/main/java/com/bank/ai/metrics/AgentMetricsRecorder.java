@@ -29,6 +29,10 @@ import java.time.Duration;
  *   <li>{@code ai.agent.tokens.input.total}       Counter             model</li>
  *   <li>{@code ai.agent.tokens.output.total}      Counter             model</li>
  *   <li>{@code ai.agent.cost.usd.total}           Counter             model</li>
+ *   <li>{@code ai.embedding.calls.total}          Counter             model, status</li>
+ *   <li>{@code ai.embedding.latency.seconds}      Timer               model</li>
+ *   <li>{@code ai.embedding.texts.total}          Counter             model</li>
+ *   <li>{@code ai.embedding.chars.total}          Counter             model</li>
  *   <li>{@code ai.agent.rpm.remaining}            Gauge               — (LlmRequestRateMeter 등록)</li>
  *   <li>{@code ai.agent.rpd.remaining}            Gauge               — (LlmRequestRateMeter 등록)</li>
  *   <li>{@code ai.agent.disagreement.total}       Counter             track</li>
@@ -130,6 +134,47 @@ public class AgentMetricsRecorder {
                     .tag(AgentMetricsTags.MODEL, model)
                     .register(registry)
                     .increment(cost.estimatedUsdCost());
+        }
+    }
+
+    // ── 임베딩 (Vertex) ──────────────────────────────────────────────────────
+
+    /**
+     * 임베딩 호출 1회(논리 배치) 기록 — 지연·건수·비용 proxy.
+     *
+     * <p>비용은 Vertex 과금 단위(입력 토큰/문자)를 직접 알 수 없어 입력 문자 수를 proxy 로 기록.
+     * 실패 호출은 latency·calls 만 기록하고 건수/문자(비용) 는 집계하지 않는다.
+     *
+     * @param model     임베딩 모델 (예: text-embedding-005)
+     * @param success   성공 여부
+     * @param latency   호출 소요(재시도 포함)
+     * @param textCount 임베딩한 텍스트 수
+     * @param charCount 입력 문자 수 (비용 proxy)
+     */
+    public void recordEmbedding(String model, boolean success, Duration latency,
+                                int textCount, long charCount) {
+        Counter.builder("ai.embedding.calls.total")
+                .tag(AgentMetricsTags.MODEL, model)
+                .tag(AgentMetricsTags.STATUS, success ? "OK" : "ERROR")
+                .register(registry)
+                .increment();
+
+        Timer.builder("ai.embedding.latency.seconds")
+                .tag(AgentMetricsTags.MODEL, model)
+                .register(registry)
+                .record(latency);
+
+        if (success && textCount > 0) {
+            Counter.builder("ai.embedding.texts.total")
+                    .tag(AgentMetricsTags.MODEL, model)
+                    .register(registry)
+                    .increment(textCount);
+        }
+        if (success && charCount > 0) {
+            Counter.builder("ai.embedding.chars.total")
+                    .tag(AgentMetricsTags.MODEL, model)
+                    .register(registry)
+                    .increment(charCount);
         }
     }
 
