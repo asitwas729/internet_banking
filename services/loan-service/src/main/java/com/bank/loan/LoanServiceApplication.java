@@ -1,6 +1,7 @@
 package com.bank.loan;
 
 import com.bank.loan.advisory.rag.AdvisoryRagProperties;
+import com.bank.loan.advisory.rag.chunk.AdvisoryParseProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -8,7 +9,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 // JPA 다중 datasource: 엔티티/리포지토리 스캔과 EMF/TxManager 는
 // PrimaryDataSourceConfig(loan_db) / CommonDataSourceConfig(common_db) 에서 명시 구성한다.
 @SpringBootApplication(scanBasePackages = {"com.bank.loan", "com.bank.common"})
-@EnableConfigurationProperties(AdvisoryRagProperties.class)
+@EnableConfigurationProperties({AdvisoryRagProperties.class, AdvisoryParseProperties.class})
 public class LoanServiceApplication {
 
     public static void main(String[] args) {

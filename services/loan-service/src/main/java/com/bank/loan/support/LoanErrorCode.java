@@ -169,7 +169,9 @@ public enum LoanErrorCode implements ErrorCode {
 
     // RAG (210-219)
     LOAN_210(HttpStatus.SERVICE_UNAVAILABLE,  "임베딩 API 호출에 실패했습니다. 잠시 후 재시도하세요."),
-    LOAN_211(HttpStatus.BAD_GATEWAY,          "임베딩 API 응답이 유효하지 않습니다. (차원 불일치 또는 빈 응답)");
+    LOAN_211(HttpStatus.BAD_GATEWAY,          "임베딩 API 응답이 유효하지 않습니다. (차원 불일치 또는 빈 응답)"),
+    LOAN_212(HttpStatus.SERVICE_UNAVAILABLE,  "문서 파싱 사이드카 호출에 실패했습니다. 잠시 후 재시도하세요."),
+    LOAN_213(HttpStatus.UNPROCESSABLE_ENTITY, "문서를 파싱하지 못했습니다. (지원하지 않는 포맷이거나 스캔본 인식 불가)");
 
     private final HttpStatus status;
     private final String message;

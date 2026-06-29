@@ -7,14 +7,17 @@ import com.bank.loan.advisory.dto.DocumentRegisterResponse;
 import com.bank.loan.advisory.rag.CaseIndexBackfillService;
 import com.bank.loan.advisory.rag.CaseIndexingService;
 import com.bank.loan.advisory.rag.DocumentIngestionService;
+import com.bank.loan.advisory.rag.RagIndexMaintenanceService;
 import com.bank.loan.advisory.repository.AdvisoryDocumentChunkRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import com.bank.common.web.BusinessException;
+import com.bank.loan.support.LoanErrorCode;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import com.bank.loan.advisory.domain.AdvisoryDocument;
 import com.bank.loan.advisory.repository.AdvisoryDocumentRepository;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,8 +27,11 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -45,6 +51,7 @@ public class InternalAdvisoryRagController {
     private final DocumentIngestionService           ingestionService;
     private final CaseIndexingService                caseIndexingService;
     private final CaseIndexBackfillService           backfillService;
+    private final RagIndexMaintenanceService         indexMaintenanceService;
     private final CurrentActorProvider               currentActor;
     private final AdvisoryDocumentRepository         documentRepository;
     private final AdvisoryDocumentChunkRepository    chunkRepository;
@@ -91,9 +98,27 @@ public class InternalAdvisoryRagController {
                           "content 필드로 문서 본문을 직접 제공 (source_uri fetch 는 현 단계 미지원).")
     @PostMapping("/documents")
     public ResponseEntity<ApiResponse<DocumentRegisterResponse>> registerDocument(
-            @Valid @RequestBody DocumentRegisterRequest req) {
+            @Valid @RequestBody DocumentRegisterRequest req,
+            @RequestParam(defaultValue = "false") boolean replace) {
         Long actorId = currentActor.currentActorId();
-        DocumentRegisterResponse res = ingestionService.register(req, actorId);
+        DocumentRegisterResponse res = ingestionService.register(req, actorId, replace);
+        return ResponseEntity.status(201).body(ApiResponse.ok(res));
+    }
+
+    @Operation(summary = "정책문서 파일 업로드 및 인입",
+            description = "PDF/Word/HWP 파일을 사이드카(inference-server)로 파싱해 구조-인지 청킹·임베딩·적재 후 " +
+                          "자동 활성화한다. file 파트는 원본 문서, meta 파트(application/json)는 문서 메타.")
+    @PostMapping(value = "/documents/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<DocumentRegisterResponse>> registerDocumentFile(
+            @RequestPart("file") MultipartFile file,
+            @Valid @RequestPart("meta") DocumentRegisterRequest meta,
+            @RequestParam(defaultValue = "false") boolean replace) throws IOException {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(LoanErrorCode.LOAN_213, "업로드 파일이 비어있습니다.");
+        }
+        Long actorId = currentActor.currentActorId();
+        DocumentRegisterResponse res = ingestionService.registerFile(
+                meta, file.getBytes(), file.getOriginalFilename(), actorId, replace);
         return ResponseEntity.status(201).body(ApiResponse.ok(res));
     }
 
@@ -151,5 +176,13 @@ public class InternalAdvisoryRagController {
         static BackfillResultResponse from(CaseIndexBackfillService.BackfillResult r) {
             return new BackfillResultResponse(r.processed(), r.skipped(), r.failed(), r.dryRun());
         }
+    }
+
+    @Operation(summary = "RAG 벡터 인덱스 재산정",
+            description = "advisory_document_chunk·advisory_case_index 의 IVFFlat lists 를 실측 rows 기준으로 " +
+                          "재계산해 인덱스를 재생성한다. 대량 인입·백필 후 호출. CREATE INDEX 쓰기 락 주의.")
+    @PostMapping("/rag/reindex")
+    public ApiResponse<RagIndexMaintenanceService.ReindexResult> reindex() {
+        return ApiResponse.ok(indexMaintenanceService.reindex());
     }
 }

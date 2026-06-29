@@ -22,5 +22,8 @@ sourceSets {
         java {
             srcDirs += ['../advisory-service/src/test/java']
         }
+        resources {
+            srcDirs += ['../advisory-service/src/test/resources']
+        }
     }
 }
