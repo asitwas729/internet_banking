@@ -99,6 +99,35 @@ public class EmbeddingReindexService {
         return new ReindexReport(corpus, srcIndex, target.v2Index(), docs.size());
     }
 
+    /**
+     * 재색인된 v2 인덱스로 alias 를 원자 스왑(v1→v2). 누락 방지를 위해
+     * {@code tgtCount >= srcCount} 게이트를 통과할 때만 수행한다.
+     *
+     * @param corpus 코퍼스 식별자
+     * @return 승격 리포트(alias, old/new 인덱스, 양쪽 문서 수)
+     * @throws IllegalStateException 이미 v2 가 활성이거나 재색인 건수가 소스보다 적을 때
+     */
+    public PromoteReport promote(String corpus) throws IOException {
+        CorpusTarget target = target(corpus);
+        String alias = aliasFor(corpus);
+        String srcIndex = admin.currentIndexForAlias(alias);
+        if (srcIndex.equals(target.v2Index())) {
+            throw new IllegalStateException("이미 v2 로 promote 됨: alias=" + alias);
+        }
+
+        long srcCount = admin.docCount(srcIndex);
+        long tgtCount = admin.docCount(target.v2Index());
+        if (tgtCount < srcCount) {
+            throw new IllegalStateException(
+                    "재색인 누락 — promote 차단: src(%d) > tgt(%d)".formatted(srcCount, tgtCount));
+        }
+
+        admin.swapAlias(alias, srcIndex, target.v2Index());
+        log.info("EmbeddingReindexService: promote 완료 — alias={} {} → {} (src={} tgt={})",
+                alias, srcIndex, target.v2Index(), srcCount, tgtCount);
+        return new PromoteReport(corpus, alias, srcIndex, target.v2Index(), srcCount, tgtCount);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private CorpusTarget target(String corpus) {
@@ -131,4 +160,8 @@ public class EmbeddingReindexService {
 
     /** 재색인 결과 리포트. */
     public record ReindexReport(String corpus, String sourceIndex, String targetIndex, int reembedded) {}
+
+    /** alias 승격 결과 리포트. */
+    public record PromoteReport(String corpus, String alias, String oldIndex, String newIndex,
+                                long sourceCount, long targetCount) {}
 }
