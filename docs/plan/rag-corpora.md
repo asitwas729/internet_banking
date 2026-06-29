@@ -4,6 +4,21 @@
 > Status: design draft (Phase 1.7. LLM 파이프라인의 grounding 근거 공급원)
 > 선행 문서: `docs/plan/banking-review-llm.md` §6, `docs/plan/llm-pipeline.md` §14
 
+> ## ⚠️ DEPRECATED — pgvector/inline 경로 (2026-06-29)
+>
+> 본 문서가 전제하는 **벡터 스토어 = PostgreSQL pgvector**(§0.1)와 **임베딩 = bge-m3
+> 1024차원**(§0.2)은 **Phase E 에서 폐기**되었다. 현재 운영 진실은 다음과 같다.
+>
+> - **검색 백엔드 = Elasticsearch**(`ai.rag.backend=es`). `kb_policy` / `kb_similar_cases`
+>   / `kb_internal_faq` alias + 하이브리드(kNN+BM25 RRF) 검색.
+> - **임베딩 = Vertex AI `text-embedding-005`(768차원)**. 전환 계획은
+>   [`vertex-embedding-migration.md`](vertex-embedding-migration.md) 참조.
+> - **pgvector `ai_embedding`(V4, `vector(1024)`) + inline(`backend=inline`) 검색은 레거시.**
+>   재작업하지 않으며, RAG kill-switch(`ai.rag.enabled=false`) 시 인라인 policy fallback
+>   경로로만 잔존한다. V4 의 1024차원·ivfflat 인덱스는 768차원 ES 매핑과 무관하다.
+>
+> 아래 §0 이후 pgvector·1024차원·ivfflat 관련 기술은 **역사적 기록**으로 읽을 것.
+
 본 문서는 LLM 리포트의 인용·근거 공급원으로서 3개 코퍼스 (유사 케이스 / 정책·규제 / 사내
 FAQ) 를 pgvector 위에 구축·서빙하는 계획. LLM 파이프라인 (Phase 1.5/1.6) 의 `Citation.id`
 swap 만으로 인라인 policy text → RAG 전환 가능하도록 인터페이스 정렬.
