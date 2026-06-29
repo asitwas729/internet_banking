@@ -33,7 +33,8 @@ class SpringAiEmbeddingClientTest {
 
     private static final int DIM = 4;
 
-    private final AgentMetricsRecorder metrics = new AgentMetricsRecorder(new SimpleMeterRegistry());
+    private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final AgentMetricsRecorder metrics = new AgentMetricsRecorder(registry);
 
     /** 백오프 0 으로 테스트 지연 제거, 작은 차원/배치로 검증. */
     private SpringAiEmbeddingClient client(int maxAttempts, int batchSize) {
@@ -130,5 +131,32 @@ class SpringAiEmbeddingClientTest {
 
         assertThat(result).isEmpty();
         verifyNoInteractions(embeddingModel);
+    }
+
+    @Test
+    void metrics_성공시_OK카운터와_텍스트수_지연_기록() {
+        when(embeddingModel.embed(anyList())).thenReturn(List.of(vec()));
+
+        client(3, 250).embed("주담대 DSR 한도");
+
+        assertThat(registry.get("ai.embedding.calls.total").tag("status", "OK").counter().count())
+                .isEqualTo(1.0);
+        assertThat(registry.get("ai.embedding.texts.total").counter().count()).isEqualTo(1.0);
+        assertThat(registry.get("ai.embedding.latency.seconds").timer().count()).isEqualTo(1L);
+    }
+
+    @Test
+    void metrics_실패시_ERROR카운터_기록하고_텍스트수는_미집계() {
+        when(embeddingModel.embed(anyList()))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.BAD_REQUEST, "bad", null, null, null));
+
+        assertThatThrownBy(() -> client(3, 250).embed("형식 오류"))
+                .isInstanceOf(BusinessException.class);
+
+        assertThat(registry.get("ai.embedding.calls.total").tag("status", "ERROR").counter().count())
+                .isEqualTo(1.0);
+        // 실패 호출은 비용(텍스트/문자) 미집계 — 미터 자체가 등록되지 않음
+        assertThat(registry.find("ai.embedding.texts.total").counter()).isNull();
     }
 }
