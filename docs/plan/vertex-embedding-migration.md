@@ -1,6 +1,6 @@
 # 실 임베딩 전환 — Vertex AI text-embedding-005 (ES-only)
 
-> Last updated: 2026-06-29 (v1.0)
+> Last updated: 2026-06-29 (v1.1 — 운영 컷오버 런북 추가)
 > 근거: next-phase-roadmap.md §Phase B "실 임베딩 전환"
 > 패키지 루트: `com.bank.ai`
 > 범위 확정: **ES-only** (pgvector/inline 경로는 레거시로 deprecate)
@@ -137,3 +137,96 @@ p99 search < 500ms.
 - **GCP 비용/쿼터**: 대량 백필 시 Vertex 임베딩 쿼터·비용 급증 → 배치 상한·백오프·야간 실행.
 - **테스트 격리**: CI 는 실 Vertex 미호출(stub 유지), vertex 경로는 모킹 단위테스트 + 수동/야간 통합으로 검증.
 - **부팅 의존성**: G1 조건화 실패 시 로컬/CI 가 GCP 자격증명을 요구하게 됨 → Step 1 단위테스트로 stub 부팅 보장.
+
+---
+
+## 운영 컷오버 런북
+
+> 대상: `ai.rag.backend=es` 운영 인스턴스. 관리 API 는 `/admin/**`(HTTP Basic, role `AI_ADMIN`,
+> 계정 `AI_ADMIN_USER`/`AI_ADMIN_PASSWORD`). 기본 포트 `8089`(`AUTO_LOAN_REVIEW_APP_PORT`).
+> 코퍼스 식별자: `policy_regulation` / `similar_cases` / `internal_faq`.
+
+### ⚠️ 핵심 위험 — 쿼리/인덱스 임베딩 정합성
+
+검색 시 **쿼리 임베딩은 현재 활성 provider 로 생성**된다(`EsHybridSearchService` 가
+`EmbeddingClient` 사용). 따라서 인덱스 벡터와 쿼리 벡터의 모델이 일치해야 한다.
+
+- `kb_*_v1`(stub 벡터) ↔ `provider=stub`
+- `kb_*_v2`(vertex 벡터) ↔ `provider=vertex`
+
+`provider=vertex` 로 재기동한 시점부터 alias 를 v2 로 promote 하기 전까지는 **vertex 쿼리 ↔ v1(stub)
+벡터** 가 되어 검색 품질이 깨진다. 이 구간을 없애기 위해 **컷오버 중에는 RAG kill-switch 를 끈다**
+(`ai.rag.enabled=false` → 인라인 policy fallback). 또는 점검창(저트래픽)에서 수행한다.
+
+### 0. 사전 준비
+
+```bash
+# GCP 자격증명 (서비스계정 키, .env 커밋 금지)
+export GOOGLE_APPLICATION_CREDENTIALS=/secret/vertex-sa.json
+export VERTEX_PROJECT_ID=<gcp-project>
+export VERTEX_LOCATION=us-central1
+export VERTEX_EMBEDDING_MODEL=text-embedding-005
+export AI_ADMIN_PASSWORD=<강력한 비밀번호>   # 기본 dev-only-change-in-prod 덮어쓰기 필수
+```
+
+- 백필은 Vertex 쿼터·비용을 소모 → **저트래픽/야간** 권장. `AI_RAG_EMB_BATCH_SIZE`(≤250)·
+  `AI_RAG_EMB_BACKOFF_MS` 로 throughput 조절.
+
+### 1. 컷오버 창 진입 — RAG 끄기
+
+```bash
+# RAG 검색을 인라인 fallback 으로 전환(벡터 쿼리 중단) — 정합성 위험 구간 차단
+export AI_RAG_ENABLED=false
+```
+
+### 2. provider=vertex 로 재기동
+
+```bash
+export AI_RAG_EMB_PROVIDER=vertex
+# 인스턴스 재시작 → VertexEmbeddingAutoConfiguration 활성, EmbeddingModel 빈 생성
+# 부팅 로그에서 "SpringAiEmbeddingClient configured: dim=768 ..." 확인
+```
+
+### 3. 코퍼스별 재색인 (v1 → v2)
+
+```bash
+BASE=http://localhost:8089
+AUTH=ai-admin:$AI_ADMIN_PASSWORD
+for C in policy_regulation similar_cases internal_faq; do
+  curl -fsS -u "$AUTH" -X POST "$BASE/admin/rag/reindex/$C"
+done
+# 응답: {"corpus":...,"sourceIndex":"kb_*_v1","targetIndex":"kb_*_v2","reembedded":N}
+```
+
+- 멱등 — 중단 시 재실행 가능(동일 `_id` 덮어쓰기). `reembedded` 가 소스 건수와 일치하는지 확인.
+
+### 4. 검증 후 alias 원자 스왑 (promote)
+
+```bash
+for C in policy_regulation similar_cases internal_faq; do
+  curl -fsS -u "$AUTH" -X POST "$BASE/admin/rag/promote/$C"
+done
+# tgtCount >= srcCount 게이트 통과 시에만 스왑. 미달이면 400/500 → 3번 재색인 재시도.
+```
+
+### 5. RAG 재개 + 품질 검증
+
+```bash
+export AI_RAG_ENABLED=true   # (필요 시 재기동)
+```
+
+- 게이트 기준(§단계별 계획 Step 4): agreementRate ≥ 0.95, citationMissRate ≤ 0.05,
+  p99 search < 500ms.
+- Grafana(B2 `ai-agent-overview.json`)에 임베딩 패널 추가:
+  `ai.embedding.latency.seconds`(p50/p99), `ai.embedding.calls.total{status}`(에러율),
+  `ai.embedding.chars.total`(비용 proxy 추이).
+
+### 6. 롤백
+
+| 시점 | 절차 |
+|---|---|
+| **promote 전** | alias 는 아직 v1 → `AI_RAG_EMB_PROVIDER=stub` 로 되돌리고 재기동, `AI_RAG_ENABLED=true`. v2 인덱스는 방치(다음 시도 시 덮어씀). |
+| **promote 후** | ① alias 를 v1 로 역스왑(ES `_aliases` 수동: remove v2 / add v1) ② `AI_RAG_EMB_PROVIDER=stub` 재기동 ③ `AI_RAG_ENABLED=true`. v1(stub) 벡터 ↔ stub 쿼리로 정합성 복구. |
+
+> 역스왑 전용 엔드포인트는 미구현(현재 promote 는 v1→v2 단방향). 운영 롤백 자동화가 필요하면
+> 별도 `POST /admin/rag/rollback/{corpus}` 추가를 검토(B5 admin 엔드포인트 묶음).
